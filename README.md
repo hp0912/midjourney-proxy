@@ -10,7 +10,7 @@ The most powerful, complete, full-featured, completely free and open source Midj
 
 代理 Midjourney 的 Discord 频道，通过 API 绘图，支持图片、视频一键换脸，公益项目，提供免费绘图接口。
 
-🦄 截至 2024 年 9 月，根据用户反馈汇总统计，使用本项目总绘图量 500万+ 张🐂，日绘图量 10万+ 张！
+🦄 截至 2024 年 9 月，根据用户反馈汇总统计，使用本项目总绘图量 1000万+ 张🐂，日绘图量 20万+ 张！
 
 ⭐ 如果觉得项目不错，请一定帮忙点个 `Star`，万分感谢！
 
@@ -256,7 +256,6 @@ curl -o linux_install.sh https://raw.githubusercontent.com/trueai-org/midjourney
 
 - 首次启动站点，默认管理员 token 为：`admin`，登录后请重置 `token`
 
-
 #### 阿里云 OSS 配置项
 
 ```json
@@ -370,7 +369,6 @@ docker run -d \
   },
   "urls": "http://*:8081" // 默认端口
 }
-
 ```
 
 ## 机器人 Token（可选配置）
@@ -399,9 +397,8 @@ docker run -d \
 <a href="https://goapi.gptnb.ai"><img src="https://img.stqu.me/images/2023/06/26/favicon.png" style="width: 60px;"></a>
 <a href="https://d.goamzai.com" target="_blank"><img src="https://d.goamzai.com/logo.png" style="width: 60px;"></a>
 <a href="https://api.ephone.ai" target="_blank"><img src="https://api.iowen.cn/favicon/supernormal.com.png" style="width: 60px;"></a>
-<a href="https://api.mjdjourney.cn" target="_blank"><img src="https://cdn.optiai.cn/file/upload/2024/08/05/1820477746069901312.png" style="width: 60px;"></a>
+<a href="https://api.mjdjourney.cn" target="_blank"><img src="https://cdn.optiai.cn/file/upload/2024/08/05/1820477746069901312.png?x-oss-process=image/resize,p_25/format,webp" style="width: 60px;"></a>
 <a href="https://rixapi.com" target="_blank"><img src="https://img.fy6b.com/2024/08/23/53d7e54cc31a2.png" style="width: 60px;"></a>
-
 
 ## 安全协议
 
