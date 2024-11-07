@@ -10,7 +10,7 @@ The most powerful, complete, full-featured, completely free and open source Midj
 
 代理 Midjourney 的 Discord 频道，通过 API 绘图，支持图片、视频一键换脸，公益项目，提供免费绘图接口。
 
-🦄 截至 2024 年 10 月，根据用户反馈汇总统计，使用本项目总绘图量 1000万+ 张🐂，日绘图量 20万+ 张！
+🦄 截至 2024 年 10 月，根据用户反馈汇总统计，使用本项目总绘图量超过 2000万+ 张🐂，日绘图量 20万+ 张！
 
 ⭐ 如果觉得项目不错，请一定帮忙点个 `Star`，万分感谢！
 
@@ -88,6 +88,7 @@ The most powerful, complete, full-featured, completely free and open source Midj
 - [x] 支持视频换脸，请遵守相关法律法规，不得用于违法用途
 - [x] 支持自动切换到慢速模式、支持自动切快速模式、支持自动设置慢速
 - [x] 私信 ID 免配置，服务启动时自动获取私信 ID
+- [x] 自动过 Tos not accepted 验证
 
 ## 在线预览
 
@@ -110,7 +111,7 @@ The most powerful, complete, full-featured, completely free and open source Midj
 - **GoAmzAI** ⭐⭐⭐⭐⭐: <https://github.com/Licoy/GoAmzAI>
   -	打开后台 -> 绘画管理 -> 新增 -> MJ 绘画接口地址 -> <https://ai.trueai.org/mj>
 
-- **ChatGPT Midjourney**: <https://github.com/Licoy/ChatGPT-Midjourney>
+- **ChatGPT Midjourney**: <https://github.com/ChatAnyTeam/ChatAny>
   - 一键拥有你自己的 ChatGPT+StabilityAI+Midjourney 网页服务 -> <https://aidemo.xiazai.zip/#/mj>
   - 打开网站 -> 设置 -> 自定义接口 -> 模型(Midjourney) -> 接口地址 -> <https://ai.trueai.org/mj>
 
@@ -363,7 +364,9 @@ docker run -d \
 
 仅支持 Windows 部署（并且支持 TLS 1.3，系统要求 Windows11 或 Windows Server 2022），由于 CloudFlare 验证器需要使用到 Chrome 浏览器，所以需要在 Windows 环境下部署，而在 Linux 环境下部署会依赖很多库，所以暂时不支持 Linux 部署。
 
-注意：自行部署需提供 2captcha.com 的 API Key，否则无法使用，价格：1000次/9元，官网：<https://2captcha.cn/p/cloudflare-turnstile>
+推荐使用：<https://yescaptcha.com/i/4pizLQ>
+
+注意：2captcha 暂不稳定，自行部署需提供 2captcha.com 的 API Key，否则无法使用，价格：1000次/9元，官网：<https://2captcha.cn/p/cloudflare-turnstile>
 
 提示：首次启动会下载 Chrome 浏览器，会比较慢，请耐心等待。
 
@@ -375,7 +378,8 @@ docker run -d \
   "Captcha": {
     "Concurrent": 1, // 并发数
     "Headless": true, // chrome 是否后台运行
-    "TwoCaptchaKey": "" // 2captcha.com 的 API Key
+    "TwoCaptchaKey": "", // 2captcha.com 的 API Key
+    "YesCaptchaKey": "" // yescaptcha.com 的 API Key
   },
   "urls": "http://*:8081" // 默认端口
 }
@@ -404,9 +408,9 @@ docker run -d \
 
 非常感谢赞助商和群友的帮助和支持，万分感谢！
 
-<a href="https://goapi.gptnb.ai"><img src="https://img.stqu.me/images/2023/06/26/favicon.png" style="width: 60px;"></a>
+<a href="https://goapi.gptnb.ai"><img src="https://pic.scdn.app/images/2023/06/26/favicon.png" style="width: 60px;"></a>
 <a href="https://d.goamzai.com" target="_blank"><img src="https://d.goamzai.com/logo.png" style="width: 60px;"></a>
-<a href="https://api.ephone.ai" target="_blank"><img src="https://api.iowen.cn/favicon/supernormal.com.png" style="width: 60px;"></a>
+<a href="https://api.ephone.ai" target="_blank"><img src="https://img.fy6b.com/2024/10/25/a0bc4cac5e72f.png" style="width: 60px;"></a>
 <a href="https://api.mjdjourney.cn" target="_blank"><img src="https://cdn.optiai.cn/file/upload/2024/08/05/1820477746069901312.png?x-oss-process=image/resize,p_25/format,webp" style="width: 60px;"></a>
 <a href="https://rixapi.com" target="_blank"><img src="https://img.fy6b.com/2024/08/23/53d7e54cc31a2.png" style="width: 60px;"></a>
 
