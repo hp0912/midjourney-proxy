@@ -27,6 +27,7 @@ using Midjourney.Infrastructure.Data;
 using Midjourney.Infrastructure.Services;
 using Midjourney.Infrastructure.Util;
 using Newtonsoft.Json.Linq;
+using RestSharp;
 using Serilog;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -1347,6 +1348,12 @@ namespace Midjourney.Infrastructure.LoadBalancer
         /// <returns></returns>
         public async Task<string> FormatUrls(string prompt)
         {
+            var setting = GlobalConfiguration.Setting;
+            if (!setting.EnableConvertOfficialLink)
+            {
+                return prompt;
+            }
+
             if (string.IsNullOrWhiteSpace(prompt))
             {
                 return prompt;
