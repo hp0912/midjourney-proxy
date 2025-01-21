@@ -897,6 +897,40 @@ namespace Midjourney.API
 
                     _logger.Error(ex, "Account({@0}) init fail, disabled: {@1}", account.ChannelId, ex.Message);
 
+                    if (setting.EnableAutoLogin)
+                    {
+                        sw.Stop();
+                        info.AppendLine($"{account.Id}尝试自动登录...");
+                        sw.Restart();
+
+                        try
+                        {
+                            // 开始尝试自动登录
+                            var suc = DiscordAccountHelper.AutoLogin(account, true);
+
+                            if (suc)
+                            {
+                                sw.Stop();
+                                info.AppendLine($"{account.Id}自动登录请求成功...");
+                                sw.Restart();
+                            }
+                            else
+                            {
+                                sw.Stop();
+                                info.AppendLine($"{account.Id}自动登录请求失败...");
+                                sw.Restart();
+                            }
+                        }
+                        catch (Exception exa)
+                        {
+                            _logger.Error(exa, "Account({@0}) auto login fail, disabled: {@1}", account.ChannelId, exa.Message);
+
+                            sw.Stop();
+                            info.AppendLine($"{account.Id}自动登录请求异常...");
+                            sw.Restart();
+                        }
+                    }
+
                     account.Enable = false;
                     account.DisabledReason = ex.Message ?? "初始化失败";
 
@@ -1056,6 +1090,15 @@ namespace Midjourney.API
                         param.FishingTime = null;
                     }
                 }
+
+                model.LoginAccount = param.LoginAccount?.Trim();
+                model.LoginPassword = param.LoginPassword?.Trim();
+                model.Login2fa = param.Login2fa?.Trim();
+                model.IsAutoLogining = false; // 重置自动登录状态
+                model.LoginStart = null;
+                model.LoginEnd = null;
+                model.LoginMessage = null;
+
 
                 model.EnableAutoSetRelax = param.EnableAutoSetRelax;
                 model.EnableRelaxToFast = param.EnableRelaxToFast;
