@@ -10,7 +10,7 @@ The most powerful, complete, full-featured, completely free and open source Midj
 
 代理 Midjourney 的 Discord 频道，通过 API 绘图，支持图片、视频一键换脸，公益项目，提供免费绘图接口。
 
-🦄 截至 2024 年 10 月，根据用户反馈汇总统计，使用本项目总绘图量超过 2000万+ 张🐂，日绘图量 20万+ 张！
+🦄 全球最大的 Midjourney 绘图 API，总绘图量超过 1 亿+ 🐂！
 
 ⭐ 如果觉得项目不错，请一定帮忙点个 `Star`，万分感谢！
 
@@ -278,15 +278,15 @@ curl -o linux_install.sh https://raw.githubusercontent.com/trueai-org/midjourney
 
 ```json
 {
-  "enable": true,
-  "bucketName": "mjopen",
-  "region": null,
-  "accessKeyId": "LTAIa***",
-  "accessKeySecret": "QGqO7***",
-  "endpoint": "oss-cn-hongkong-internal.aliyuncs.com",
-  "customCdn": "https://mjcdn.googlec.cc",
-  "imageStyle": "x-oss-process=style/webp",
-  "thumbnailImageStyle": "x-oss-process=style/w200"
+  "bucketName": "mjopen",//创建的OSS名称
+  "accessKeyId": "LTAIa***",//OSS的accesskeyID
+  "accessKeySecret": "QGqO7***",//OSS的密钥
+  "endpoint": "oss-cn-hongkong-internal.aliyuncs.com",//OSS的域名
+  "customCdn": null,
+  "imageStyle": null,
+  "thumbnailImageStyle": null,
+  "videoSnapshotStyle": null,
+  "expiredMinutes": 0
 }
 ```
 

@@ -95,7 +95,9 @@ namespace Midjourney.API
             }
 
             // 判断是否启用了 mongodb
-            if (GlobalConfiguration.Setting.IsMongo)
+            // 并且开启了自动迁移
+            if (GlobalConfiguration.Setting.IsMongo
+                && GlobalConfiguration.Setting.IsMongoAutoMigrate)
             {
                 // 迁移 account user domain banded
                 try
@@ -183,7 +185,6 @@ namespace Midjourney.API
                     LiteDBHelper.SettingStore.Save(GlobalConfiguration.Setting);
                 }
             }
-
 
             // 初始化管理员用户
             // 判断超管是否存在
@@ -286,7 +287,7 @@ namespace Midjourney.API
                         MongoAutoMigrate();
                     }
 
-                    var oss = GlobalConfiguration.Setting.AliyunOss;
+                    //var oss = GlobalConfiguration.Setting.AliyunOss;
 
                     //if (oss?.Enable == true && oss?.IsAutoMigrationLocalFile == true)
                     //{
@@ -701,6 +702,20 @@ namespace Midjourney.API
                 {
                     // 获取获取值
                     account = db.Get(account.Id)!;
+
+                    // 如果账号处于登录中
+                    if (account.IsAutoLogining)
+                    {
+                        // 如果超过 10 分钟
+                        if (account.LoginStart.HasValue && account.LoginStart.Value.AddMinutes(10) < DateTime.Now)
+                        {
+                            account.IsAutoLogining = false;
+                            account.LoginMessage = "登录超时";
+
+                            db.Update("IsAutoLogining,LoginMessage", account);
+                        }
+                    }
+
                     if (account.Enable != true)
                     {
                         return;
