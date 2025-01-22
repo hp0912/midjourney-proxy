@@ -39,24 +39,29 @@ namespace Midjourney.Captcha.API
         /// <summary>
         /// 登录
         /// </summary>
-        /// <param name="contentRootPath"> </param>
+        /// <param name="contentRootPath"></param>
         /// <param name="clientKey"></param>
         /// <param name="loginAccount"></param>
         /// <param name="loginPassword"></param>
         /// <param name="twofa"></param>
-        public static string Login(string contentRootPath, string clientKey, string loginAccount, string loginPassword, string twofa)
+        /// <returns></returns>
+        public static (bool success, string data) Login(string contentRootPath, string clientKey, string loginAccount, string loginPassword, string twofa)
         {
+            var errorMsg = "";
             ChromeDriver driver = null;
             try
             {
-                var configPath = Path.Combine(contentRootPath, "Extensions", "google_pro_1.1.57", "config.js");
+                // 插件版本
+                var pluVersion = "google_pro_1.1.64";
+
+                var configPath = Path.Combine(contentRootPath, "Extensions", pluVersion, "config.js");
                 var configContent = "";
                 if (File.Exists(configPath))
                 {
                     configContent = File.ReadAllText(configPath);
                 }
 
-                var configDemoPath = Path.Combine(contentRootPath, "Extensions", "google_pro_1.1.57", "config-demo.js");
+                var configDemoPath = Path.Combine(contentRootPath, "Extensions", pluVersion, "config-demo.js");
                 var configDemoContent = File.ReadAllText(configDemoPath)
                     .Replace("$clientKey", clientKey);
 
@@ -66,7 +71,7 @@ namespace Midjourney.Captcha.API
                     File.WriteAllText(configPath, configDemoContent);
                 }
 
-                driver = GetChrome(false, false, contentRootPath);
+                driver = GetChrome(false, false, contentRootPath, pluVersion);
                 driver.Navigate().GoToUrl("https://discord.com/login");
 
                 Thread.Sleep(5000);
@@ -94,11 +99,25 @@ namespace Midjourney.Captcha.API
 
                 Thread.Sleep(5000);
 
+                // 确保页面加载完成
+                var wait1 = new WebDriverWait(driver, TimeSpan.FromSeconds(60));
+                wait1.Until(d => ((IJavaScriptExecutor)d).ExecuteScript("return document.readyState").ToString() == "complete");
+
                 var sw = new Stopwatch();
                 sw.Start();
 
                 while (true)
                 {
+                    // 判断是否是密码错误
+                    // 查找元素 登录或密码无效
+                    var errorPwd = driver.FindElements(By.XPath("//span[contains(text(),'登录或密码无效')]"))?.FirstOrDefault();
+                    if (errorPwd != null)
+                    {
+                        Log.Error("登录或密码无效");
+
+                        return (false, "登录或密码无效");
+                    }
+
                     // placeholder="6位数字身份验证码"
                     var codeInput = driver.FindElements(By.CssSelector("input[placeholder='6位数字身份验证码']"))
                         ?.FirstOrDefault();
@@ -106,6 +125,8 @@ namespace Midjourney.Captcha.API
                     // 如果找到了
                     if (codeInput != null)
                     {
+                        var faRetry = 0;
+
                         while (true)
                         {
                             var num = TwoFAHelper.GenerateOtp(twofa);
@@ -168,23 +189,35 @@ window.webpackChunkdiscord_app.push([
                                 var token = driver.FindElement(By.CssSelector("body")).GetAttribute("data-token");
                                 if (!string.IsNullOrEmpty(token))
                                 {
-                                    Log.Information($"token: {token}");
+                                    Log.Information($"登录成功 token: {token}");
 
-                                    return token;
+                                    return (true, token);
+                                }
+                            }
+                            else
+                            {
+                                Log.Error("双重认证码无效");
+                                faRetry++;
+
+                                if (faRetry > 3)
+                                {
+                                    return (false, "双重认证码无效");
                                 }
                             }
 
-                            if (sw.ElapsedMilliseconds > 120 * 1000)
+                            if (sw.ElapsedMilliseconds > 30 * 1000)
                             {
-                                break;
+                                return (false, "2FA 执行登录超时");
                             }
+
+                            Thread.Sleep(5000);
                         }
                     }
                     else
                     {
-                        if (sw.ElapsedMilliseconds > 120 * 1000)
+                        if (sw.ElapsedMilliseconds > 60 * 1000)
                         {
-                            break;
+                            return (false, "登录超时");
                         }
 
                         Thread.Sleep(2000);
@@ -194,6 +227,8 @@ window.webpackChunkdiscord_app.push([
             catch (Exception ex)
             {
                 Log.Error(ex, "自动登录执行异常");
+
+                errorMsg = "登录异常";
             }
             finally
             {
@@ -201,7 +236,7 @@ window.webpackChunkdiscord_app.push([
                 driver?.Quit();
             }
 
-            return null;
+            return (false, errorMsg);
         }
 
         /// <summary>
@@ -210,8 +245,9 @@ window.webpackChunkdiscord_app.push([
         /// <param name="isHeadless"></param>
         /// <param name="isMobile"></param>
         /// <param name="contentRootPath"></param>
+        /// <param name="pluVersion"></param>
         /// <returns></returns>
-        private static ChromeDriver GetChrome(bool isHeadless, bool isMobile, string contentRootPath)
+        private static ChromeDriver GetChrome(bool isHeadless, bool isMobile, string contentRootPath, string pluVersion)
         {
             //// 设置输出编码，否则可能浏览器乱码，在后台运行模式时
             //Console.OutputEncoding = System.Text.Encoding.UTF8;
@@ -235,7 +271,7 @@ window.webpackChunkdiscord_app.push([
             }
 
             // 加载解压后的扩展
-            var path = Path.Combine(contentRootPath, "Extensions", "google_pro_1.1.57");
+            var path = Path.Combine(contentRootPath, "Extensions", pluVersion);
             options.AddArgument($"--load-extension={path}");
 
             //options.AddArgument("--window-size=360,640");
