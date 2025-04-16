@@ -54,9 +54,9 @@ namespace Midjourney.Infrastructure.LoadBalancer
         private readonly ITaskStoreService _taskStoreService;
         private readonly INotifyService _notifyService;
 
-        private readonly List<TaskInfo> _runningTasks = [];
+        private readonly ConcurrentDictionary<TaskInfo, int> _runningTasks = [];
         private readonly ConcurrentDictionary<string, Task> _taskFutureMap = [];
-        private readonly AsyncParallelLock _semaphoreSlimLock;
+        private AsyncParallelLock _semaphoreSlimLock;
 
         private readonly Task _longTask;
         private readonly Task _longTaskCache;
@@ -220,7 +220,7 @@ namespace Midjourney.Infrastructure.LoadBalancer
         /// 获取正在运行的任务列表。
         /// </summary>
         /// <returns>正在运行的任务列表</returns>
-        public List<TaskInfo> GetRunningTasks() => _runningTasks;
+        public List<TaskInfo> GetRunningTasks() => _runningTasks.Keys.ToList();
 
         /// <summary>
         /// 获取队列中的任务列表。
@@ -291,6 +291,28 @@ namespace Midjourney.Infrastructure.LoadBalancer
 
                         // 等待
                         Thread.Sleep(100);
+                    }
+
+                    // 判断信号最大值是否为 Account.CoreSize
+                    if (_semaphoreSlimLock.MaxParallelism != Account.CoreSize)
+                    {
+                        //// 如果任务并发从 12 变成了 3
+                        //// 则等待任务结束后，重置为 3
+                        //while (_runningTasks.Count > Account.CoreSize)
+                        //{
+                        //    // 等待
+                        //    Thread.Sleep(100);
+                        //}
+
+                        // 等待释放完
+                        while (_runningTasks.Count > 0)
+                        {
+                            // 等待
+                            Thread.Sleep(100);
+                        }
+
+                        // 重新设置信号量
+                        _semaphoreSlimLock = new AsyncParallelLock(Math.Max(1, Math.Min(Account.CoreSize, 12)));
                     }
 
                     //// 允许同时执行 N 个信号量的任务
@@ -550,7 +572,7 @@ namespace Midjourney.Infrastructure.LoadBalancer
             {
                 await _semaphoreSlimLock.LockAsync();
 
-                _runningTasks.Add(info);
+                _runningTasks.TryAdd(info, 0);
 
                 // 判断当前实例是否可用
                 if (!IsAlive)
@@ -682,7 +704,7 @@ namespace Midjourney.Infrastructure.LoadBalancer
             }
             finally
             {
-                _runningTasks.Remove(info);
+                _runningTasks.TryRemove(info, out _);
                 _taskFutureMap.TryRemove(info.Id, out _);
 
                 _semaphoreSlimLock.Unlock();
@@ -693,12 +715,12 @@ namespace Midjourney.Infrastructure.LoadBalancer
 
         public void AddRunningTask(TaskInfo task)
         {
-            _runningTasks.Add(task);
+            _runningTasks.TryAdd(task, 0);
         }
 
         public void RemoveRunningTask(TaskInfo task)
         {
-            _runningTasks.Remove(task);
+            _runningTasks.TryRemove(task, out _);
         }
 
         /// <summary>
@@ -815,7 +837,7 @@ namespace Midjourney.Infrastructure.LoadBalancer
                 // 释放未完成的任务
                 foreach (var runningTask in _runningTasks)
                 {
-                    runningTask.Fail("强制取消"); // 取消任务（假设TaskInfo有Cancel方法）
+                    runningTask.Key.Fail("强制取消"); // 取消任务（假设TaskInfo有Cancel方法）
                 }
 
                 // 清理任务队列
