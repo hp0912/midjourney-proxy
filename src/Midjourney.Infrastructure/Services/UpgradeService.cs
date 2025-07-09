@@ -13,11 +13,6 @@ namespace Midjourney.Infrastructure.Services
     public interface IUpgradeService
     {
         /// <summary>
-        /// 启动时检查升级文件
-        /// </summary>
-        Task CheckAndPerformStartupUpgradeAsync();
-
-        /// <summary>
         /// 检查最新版本
         /// </summary>
         Task<UpgradeInfo> CheckForUpdatesAsync();
@@ -49,11 +44,17 @@ namespace Midjourney.Infrastructure.Services
     }
 
     /// <summary>
-    /// 检查升级服务 - 适用于 win-x64/linux-x64/docker
+    /// 检查升级服务 - 适用于 docker linux-x64
     /// </summary>
     public class UpgradeService : IUpgradeService
     {
+        // 升级目录
         private const string UpgradeDirectory = "Upgrade";
+
+        // 解压目录
+        private const string ExtractDirectory = "Extract";
+
+        // GitHub API URL
         private const string GitHubApiUrlProxy = "https://api.github.com/repos/trueai-org/midjourney-proxy/releases/latest";
 
         private readonly string _upgradePath;
@@ -90,7 +91,21 @@ namespace Midjourney.Infrastructure.Services
             get
             {
                 var platform = GetCurrentPlatform();
-                return platform == "win-x64" || platform == "linux-x64";
+                return platform == "linux-x64" && IsDockerEnvironment();
+            }
+        }
+
+        private bool IsDockerEnvironment()
+        {
+            try
+            {
+                return System.IO.File.Exists("/.dockerenv") ||
+                Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true" ||
+                Environment.GetEnvironmentVariable("DOCKER_CONTAINER") != null;
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -209,6 +224,13 @@ namespace Midjourney.Infrastructure.Services
                 var existingFile = FindUpgradeFile();
                 if (asset.Name == Path.GetFileName(existingFile))
                 {
+                    // 解压升级包
+                    await ExtractTarGzAsync(existingFile);
+
+                    _upgradeInfo.Status = UpgradeStatus.ReadyToRestart;
+                    _upgradeInfo.Progress = 100;
+                    _upgradeInfo.Message = "升级包下载完成，重启应用程序即可升级";
+
                     _upgradeInfo.Status = UpgradeStatus.ReadyToRestart;
                     _upgradeInfo.Message = "最新版已下载完成，等待重启应用程序";
                     return true;
@@ -394,19 +416,8 @@ namespace Midjourney.Infrastructure.Services
 
                 _upgradeInfo.Progress = 99;
 
-                // 下载完成后解压文件
-                var extractPath = Path.Combine(_upgradePath, "extract");
-
-                // 清理旧的解压目录
-                if (Directory.Exists(extractPath))
-                {
-                    Directory.Delete(extractPath, true);
-                }
-
-                Directory.CreateDirectory(extractPath);
-
                 // 解压升级包
-                await ExtractTarGzAsync(targetPath, extractPath);
+                await ExtractTarGzAsync(targetPath);
 
                 _upgradeInfo.Status = UpgradeStatus.ReadyToRestart;
                 _upgradeInfo.Progress = 100;
@@ -437,19 +448,10 @@ namespace Midjourney.Infrastructure.Services
             {
                 Log.Information("开始执行升级: {File}", upgradeFilePath);
 
-                var fileName = Path.GetFileName(upgradeFilePath);
-                var extractPath = Path.Combine(_upgradePath, "extract");
-
-                // 清理旧的解压目录
-                if (Directory.Exists(extractPath))
-                {
-                    Directory.Delete(extractPath, true);
-                }
-
-                Directory.CreateDirectory(extractPath);
+                var extractPath = Path.Combine(_upgradePath, ExtractDirectory);
 
                 // 解压升级包
-                await ExtractTarGzAsync(upgradeFilePath, extractPath);
+                await ExtractTarGzAsync(upgradeFilePath);
 
                 // 查找应用程序目录
                 var appPath = FindApplicationPath(extractPath);
@@ -483,10 +485,21 @@ namespace Midjourney.Infrastructure.Services
             }
         }
 
-        private async Task ExtractTarGzAsync(string tarGzPath, string extractPath)
+        private async Task ExtractTarGzAsync(string tarGzPath)
         {
             try
             {
+                // 下载完成后解压文件
+                var extractPath = Path.Combine(_upgradePath, ExtractDirectory);
+
+                // 清理旧的解压目录
+                if (Directory.Exists(extractPath))
+                {
+                    Directory.Delete(extractPath, true);
+                }
+
+                Directory.CreateDirectory(extractPath);
+
                 // 在实际项目中，您可能需要使用 SharpZipLib 或其他库来处理 tar.gz
                 // 使用外部工具解压 tar.gz（Linux 环境）
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
