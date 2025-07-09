@@ -91,6 +91,13 @@ namespace Midjourney.Infrastructure.Services
             get
             {
                 var platform = GetCurrentPlatform();
+
+#if DEBUG
+                // 开发模式允许 linux-x64 win-x64
+                return platform == "linux-x64" || platform == "win-x64";
+#endif
+
+                // 生产环境只支持 linux-x64
                 return platform == "linux-x64" && IsDockerEnvironment();
             }
         }
@@ -171,6 +178,7 @@ namespace Midjourney.Infrastructure.Services
                 }
 
                 _upgradeInfo.LatestVersion = latestRelease.TagName;
+                _upgradeInfo.Body = latestRelease.Body;
                 _upgradeInfo.HasUpdate = IsNewerVersion(_upgradeInfo.LatestVersion, _upgradeInfo.CurrentVersion);
 
                 if (_upgradeInfo.HasUpdate)
