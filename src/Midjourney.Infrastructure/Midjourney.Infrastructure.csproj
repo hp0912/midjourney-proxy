@@ -15,8 +15,8 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<Reference Include="Midjourney.License">
-			<HintPath>..\lib\Midjourney.License.dll</HintPath>
-		</Reference>
+	  <Reference Include="Midjourney.License">
+	    <HintPath>..\lib\Midjourney.License.dll</HintPath>
+	  </Reference>
 	</ItemGroup>
 </Project>
