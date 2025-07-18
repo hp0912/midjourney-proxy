@@ -25,7 +25,9 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Caching.Memory;
+using Midjourney.Base.Services;
 using Midjourney.Infrastructure.LoadBalancer;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -212,6 +214,59 @@ namespace Midjourney.Infrastructure.Services
             {
                 if (instance.Account.IsYouChuan || instance.Account.IsOfficial)
                 {
+                    var imageUrls = new List<string>();
+                    foreach (var dataUrl in dataUrls)
+                    {
+                        if (instance.Account.IsYouChuan)
+                        {
+                            var link = "";
+                            // 悠船
+                            if (dataUrl.Url?.StartsWith("http", StringComparison.OrdinalIgnoreCase) == true)
+                            {
+                                link = dataUrl.Url;
+                            }
+                            else
+                            {
+                                var taskFileName = $"{Guid.NewGuid():N}.{MimeTypeUtils.GuessFileSuffix(dataUrl.MimeType)}";
+                                link = await instance.YmTaskService.UploadFileAsync(info, dataUrl.Data, taskFileName);
+                            }
+
+                            imageUrls.Add(link);
+                        }
+                        else
+                        {
+                            var taskFileName = $"{info.Id}.{MimeTypeUtils.GuessFileSuffix(dataUrl.MimeType)}";
+                            var uploadResult = await instance.UploadAsync(taskFileName, dataUrl);
+                            if (uploadResult.Code != ReturnCode.SUCCESS)
+                            {
+                                return Message.Of(uploadResult.Code, uploadResult.Description);
+                            }
+
+                            if (uploadResult.Description.StartsWith("http"))
+                            {
+                                imageUrls.Add(uploadResult.Description);
+                            }
+                            else
+                            {
+                                var finalFileName = uploadResult.Description;
+                                var sendImageResult = await instance.SendImageMessageAsync("upload image: " + finalFileName, finalFileName);
+                                if (sendImageResult.Code != ReturnCode.SUCCESS)
+                                {
+                                    return Message.Of(sendImageResult.Code, sendImageResult.Description);
+                                }
+                                imageUrls.Add(sendImageResult.Description);
+                            }
+                        }
+                    }
+
+                    if (imageUrls.Any())
+                    {
+                        info.Prompt = string.Join(" ", imageUrls) + " " + info.Prompt;
+                        info.PromptEn = string.Join(" ", imageUrls) + " " + info.PromptEn;
+                        info.Description = "/imagine " + info.Prompt;
+                        _taskStoreService.Save(info);
+                    }
+
                     return await instance.YmTaskService.SubmitTaskAsync(info, _taskStoreService, instance);
                 }
                 else
@@ -562,29 +617,69 @@ namespace Midjourney.Infrastructure.Services
             return discordInstance.SubmitTaskAsync(task, async () =>
             {
                 var isYm = task.IsPartner || task.IsOfficial;
-                var finalFileNames = new List<string>();
-                foreach (var dataUrl in dataUrls)
-                {
-                    var guid = "";
-                    if (dataUrls.Count > 0)
-                    {
-                        guid = "-" + Guid.NewGuid().ToString("N");
-                    }
-
-                    var taskFileName = $"{task.Id}{guid}.{MimeTypeUtils.GuessFileSuffix(dataUrl.MimeType)}";
-
-                    var uploadResult = await discordInstance.UploadAsync(taskFileName, dataUrl, useDiscordUpload: !isYm);
-                    if (uploadResult.Code != ReturnCode.SUCCESS)
-                    {
-                        return Message.Of(uploadResult.Code, uploadResult.Description);
-                    }
-
-                    finalFileNames.Add(uploadResult.Description);
-                }
-
                 // youchaun | mj
                 if (isYm)
                 {
+                    var finalFileNames = new List<string>();
+
+                    if (task.IsPartner)
+                    {
+                        var link = "";
+                        foreach (var dataUrl in dataUrls)
+                        {
+                            // 悠船
+                            if (dataUrl.Url?.StartsWith("http", StringComparison.OrdinalIgnoreCase) == true)
+                            {
+                                link = dataUrl.Url;
+                            }
+                            else
+                            {
+                                var taskFileName = $"{Guid.NewGuid():N}.{MimeTypeUtils.GuessFileSuffix(dataUrl.MimeType)}";
+                                link = await discordInstance.YmTaskService.UploadFileAsync(task, dataUrl.Data, taskFileName);
+                            }
+
+                            if (string.IsNullOrWhiteSpace(link))
+                            {
+                                return Message.Of(ReturnCode.FAILURE, "上传失败，未返回有效链接");
+                            }
+
+                            finalFileNames.Add(link);
+                        }
+                    }
+                    else
+                    {
+                        var link = "";
+                        foreach (var dataUrl in dataUrls)
+                        {
+                            // 官方
+                            if (dataUrl.Url?.StartsWith("http", StringComparison.OrdinalIgnoreCase) == true)
+                            {
+                                link = dataUrl.Url;
+                            }
+                            else
+                            {
+                                var taskFileName = $"{Guid.NewGuid():N}.{MimeTypeUtils.GuessFileSuffix(dataUrl.MimeType)}";
+                                var uploadResult = await discordInstance.UploadAsync(taskFileName, dataUrl);
+                                if (uploadResult.Code != ReturnCode.SUCCESS)
+                                {
+                                    return Message.Of(uploadResult.Code, uploadResult.Description);
+                                }
+
+                                if (uploadResult.Description.StartsWith("http"))
+                                {
+                                    link = uploadResult.Description;
+                                }
+                            }
+
+                            if (string.IsNullOrWhiteSpace(link))
+                            {
+                                return Message.Of(ReturnCode.FAILURE, "上传失败，未返回有效链接");
+                            }
+
+                            finalFileNames.Add(link);
+                        }
+                    }
+
                     task.Action = TaskAction.BLEND;
                     task.PromptEn = string.Join(" ", finalFileNames) + " " + task.PromptEn;
 
@@ -613,9 +708,31 @@ namespace Midjourney.Infrastructure.Services
 
                     return await discordInstance.YmTaskService.SubmitTaskAsync(task, _taskStoreService, discordInstance);
                 }
+                else
+                {
+                    var finalFileNames = new List<string>();
+                    foreach (var dataUrl in dataUrls)
+                    {
+                        var guid = "";
+                        if (dataUrls.Count > 0)
+                        {
+                            guid = "-" + Guid.NewGuid().ToString("N");
+                        }
 
-                return await discordInstance.BlendAsync(finalFileNames, dimensions,
-                    task.GetProperty<string>(Constants.TASK_PROPERTY_NONCE, default), task.RealBotType ?? task.BotType);
+                        var taskFileName = $"{task.Id}{guid}.{MimeTypeUtils.GuessFileSuffix(dataUrl.MimeType)}";
+
+                        var uploadResult = await discordInstance.UploadAsync(taskFileName, dataUrl, useDiscordUpload: !isYm);
+                        if (uploadResult.Code != ReturnCode.SUCCESS)
+                        {
+                            return Message.Of(uploadResult.Code, uploadResult.Description);
+                        }
+
+                        finalFileNames.Add(uploadResult.Description);
+                    }
+
+                    return await discordInstance.BlendAsync(finalFileNames, dimensions,
+                        task.GetProperty<string>(Constants.TASK_PROPERTY_NONCE, default), task.RealBotType ?? task.BotType);
+                }
             });
         }
 
