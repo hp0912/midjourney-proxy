@@ -190,6 +190,12 @@ namespace Midjourney.Base.Models
         public string ImageUrl { get; set; }
 
         /// <summary>
+        /// 图像URL列表
+        /// </summary>
+        [JsonMap]
+        public List<TaskInfoImageUrl> ImageUrls { get; set; } = [];
+
+        /// <summary>
         /// 缩略图 url
         /// </summary>
         [Column(StringLength = 1024)]
@@ -761,5 +767,22 @@ namespace Midjourney.Base.Models
         /// 
         /// </summary>
         public List<CustomComponentModel> Buttons { get; set; } = new List<CustomComponentModel>();
+    }
+
+    /// <summary>
+    /// 图像URL信息
+    /// </summary>
+    public class TaskInfoImageUrl
+    {
+        public TaskInfoImageUrl(string url)
+        {
+            Url = url;
+        }
+
+        /// <summary>
+        /// 图像 URL
+        /// </summary>
+        [JsonPropertyName("url")]
+        public string Url { get; set; }
     }
 }
