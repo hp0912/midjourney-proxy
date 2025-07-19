@@ -1280,6 +1280,9 @@ namespace Midjourney.Infrastructure.LoadBalancer
             prompt = prompt.Replace(" -- ", " ")
                 .Replace("  ", " ").Replace("  ", " ").Replace("  ", " ").Trim();
 
+            // 使用正则替换超过 --- 3个 - 的替换为 " "
+            prompt = Regex.Replace(prompt, @"-{3,}", " ");
+
             // 任务指定速度模式
             if (info != null && info.Mode != null)
             {
@@ -1407,9 +1410,18 @@ namespace Midjourney.Infrastructure.LoadBalancer
                     try
                     {
                         // 如果是悠船任务，并且链接包含悠船，则不处理
-                        if (info.IsPartner && url.Contains("youchuan"))
+                        if (info.IsPartner)
                         {
-                            continue;
+                            if (url.Contains("youchuan"))
+                            {
+                                continue;
+                            }
+
+                            // 未启用链接转换
+                            if (!setting.EnableYouChuanPromptLink)
+                            {
+                                continue;
+                            }
                         }
 
                         // url 缓存默认 24 小时有效
@@ -1425,27 +1437,43 @@ namespace Midjourney.Infrastructure.LoadBalancer
                             }
                             else if (res.Success && res.FileBytes.Length > 0)
                             {
-                                // 上传到 Discord 服务器
-                                var uploadResult = await UploadAsync(res.FileName, new DataUrl(res.ContentType, res.FileBytes));
-                                if (uploadResult.Code != ReturnCode.SUCCESS)
+                                if (info.IsPartner)
                                 {
-                                    throw new LogicException(uploadResult.Code, uploadResult.Description);
-                                }
-
-                                if (uploadResult.Description.StartsWith("http"))
-                                {
-                                    return uploadResult.Description;
+                                    // 悠船链接转换
+                                    var youchuanUrl = await _ymTaskService.UploadFileAsync(info, res.FileBytes, res.FileName);
+                                    if (!string.IsNullOrWhiteSpace(youchuanUrl))
+                                    {
+                                        return youchuanUrl;
+                                    }
+                                    else
+                                    {
+                                        throw new LogicException(ReturnCode.FAILURE, "悠船链接转换失败");
+                                    }
                                 }
                                 else
                                 {
-                                    var finalFileName = uploadResult.Description;
-                                    var sendImageResult = await SendImageMessageAsync("upload image: " + finalFileName, finalFileName);
-                                    if (sendImageResult.Code != ReturnCode.SUCCESS)
+                                    // 上传到 Discord 服务器
+                                    var uploadResult = await UploadAsync(res.FileName, new DataUrl(res.ContentType, res.FileBytes));
+                                    if (uploadResult.Code != ReturnCode.SUCCESS)
                                     {
-                                        throw new LogicException(sendImageResult.Code, sendImageResult.Description);
+                                        throw new LogicException(uploadResult.Code, uploadResult.Description);
                                     }
 
-                                    return sendImageResult.Description;
+                                    if (uploadResult.Description.StartsWith("http"))
+                                    {
+                                        return uploadResult.Description;
+                                    }
+                                    else
+                                    {
+                                        var finalFileName = uploadResult.Description;
+                                        var sendImageResult = await SendImageMessageAsync("upload image: " + finalFileName, finalFileName);
+                                        if (sendImageResult.Code != ReturnCode.SUCCESS)
+                                        {
+                                            throw new LogicException(sendImageResult.Code, sendImageResult.Description);
+                                        }
+
+                                        return sendImageResult.Description;
+                                    }
                                 }
                             }
 
