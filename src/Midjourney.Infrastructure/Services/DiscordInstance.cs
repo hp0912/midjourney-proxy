@@ -652,7 +652,7 @@ namespace Midjourney.Infrastructure.LoadBalancer
                     if (info.IsPartner || info.IsOfficial)
                     {
 
-                        await _ymTaskService.UpdateStatus(info, _taskStoreService);
+                        await _ymTaskService.UpdateStatus(info, _taskStoreService, Account);
 
                         await Task.Delay(1000);
                     }
@@ -2117,12 +2117,21 @@ namespace Midjourney.Infrastructure.LoadBalancer
         }
 
         /// <summary>
-        /// 悠船每 1 分钟同步一次账号信息
+        /// 悠船每 n 分钟同步一次账号信息
         /// </summary>
         /// <returns></returns>
         public async Task YouChuanSyncInfo()
         {
             await _ymTaskService.YouChuanSyncInfo();
+        }
+
+        /// <summary>
+        /// 官网每 n 分钟同步一次账号信息
+        /// </summary>
+        /// <returns></returns>
+        public async Task OfficialSyncInfo()
+        {
+            await _ymTaskService.OfficialSyncInfo();
         }
     }
 }

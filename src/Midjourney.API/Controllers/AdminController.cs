@@ -399,18 +399,40 @@ namespace Midjourney.API.Controllers
                 logName = "error";
             }
 
-            // 项目目录，而不是 AppContext.BaseDirectory
-            var logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"logs/{logName}{DateTime.Now:yyyyMMdd}.txt");
+            // log20250720.txt
+            // log20250720_001.txt
 
+            // 要获取最后一个文件
+            var dirs = Path.Combine(Directory.GetCurrentDirectory(), "logs");
+            if (!Directory.Exists(dirs))
+            {
+                return Ok("Log directory not found.");
+            }
+
+            // 获取最新的日志文件
+            var logFiles = Directory.GetFiles(dirs, $"{logName}*.txt")
+                .Select(f => new FileInfo(f))
+                .OrderByDescending(f => f.LastWriteTime)
+                .ToList();
+
+
+            // 项目目录，而不是 AppContext.BaseDirectory
+            //var logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"logs/{logName}{DateTime.Now:yyyyMMdd}.txt");
+            var logFilePath = logFiles.FirstOrDefault()?.FullName;
             if (!System.IO.File.Exists(logFilePath))
             {
-                //return NotFound("Log file not found.");
-
                 return Ok("Log file not found.");
             }
 
             try
             {
+                // 如果文件超过 100MB
+                var fileInfo = new FileInfo(logFilePath);
+                if (fileInfo.Length > 100 * 1024 * 1024)
+                {
+                    return Ok("Log file was too large.");
+                }
+
                 using (var fileStream = new FileStream(logFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                 using (var streamReader = new StreamReader(fileStream))
                 {
@@ -418,9 +440,11 @@ namespace Midjourney.API.Controllers
                     return Ok(string.Join("\n", logLines));
                 }
             }
-            catch (IOException ex)
+            catch (Exception ex)
             {
-                return StatusCode(500, $"Error reading log file: {ex.Message}");
+                Log.Error(ex, "Error reading log file");
+
+                return StatusCode(500, $"Error reading log file");
             }
         }
 
@@ -2050,11 +2074,13 @@ namespace Midjourney.API.Controllers
             try
             {
                 // 保存时验证授权
-                var success = await LicenseKeyHelper.ValidateSync(setting.LicenseKey, setting.EnableYouChuan, setting.EnableOfficial);
-                if (!success)
+                var res = await LicenseKeyHelper.ValidateSync(setting.LicenseKey, setting.EnableYouChuan, setting.EnableOfficial);
+                if (!res.IsAuthorized)
                 {
                     return Result.Fail("授权验证失败，请检查授权码是否正确，如果没有授权码，请输入默认授权码：trueai.org");
                 }
+
+                setting.PrivateFeatures = res.Features ?? [];
             }
             catch (Exception ex)
             {

@@ -22,6 +22,7 @@
 // invasion of privacy, or any other unlawful purposes is strictly prohibited. 
 // Violation of these terms may result in termination of the license and may subject the violator to legal action.
 using System.Text.RegularExpressions;
+using Serilog;
 
 namespace Midjourney.Base
 {
@@ -51,7 +52,17 @@ namespace Midjourney.Base
             var match = Regex.Match(dataUrl, @"data:(?<type>.+?);base64,(?<data>.+)");
             if (!match.Success)
             {
-                throw new FormatException("Invalid data URL format");
+                // 说明没有前缀，直接尝试解析为 base64 字符串
+                match = Regex.Match(dataUrl, @"^(?<data>.+)$");
+                if (!match.Success)
+                {
+                    Log.Warning("Invalid data URL format: {DataUrl}", dataUrl);
+
+                    throw new FormatException("Invalid data URL format");
+                }
+
+                var defaultMimeType = "image/png";
+                return new DataUrl(defaultMimeType, Convert.FromBase64String(match.Groups["data"].Value));
             }
 
             string mimeType = match.Groups["type"].Value;
