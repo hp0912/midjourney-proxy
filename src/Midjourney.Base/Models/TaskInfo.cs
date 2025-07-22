@@ -45,6 +45,19 @@ namespace Midjourney.Base.Models
     [Index("i_Status", "Status")]
     [Index("i_Action", "Action")]
     [Index("i_ParentId", "ParentId")]
+    [Index("i_SubmitTime_UserId", "Group,UserId")]
+    [Index("i_SubmitTime_InstanceId", "SubmitTime,InstanceId")]
+    [Index("i_State", "State")]
+    [Index("i_Nonce", "Nonce")]
+    //[Index("i_Prompt", "Prompt")]
+    //[Index("i_PromptEn", "PromptEn")]
+    //[Index("i_PromptFull", "PromptFull")]
+    //[Index("i_Description", "Description")]
+    //[Index("i_FailReason", "FailReason")]
+    [Index("i_IsPartner", "IsPartner")]
+    [Index("i_PartnerTaskId", "PartnerTaskId")]
+    [Index("i_IsOfficial", "IsOfficial")]
+    [Index("i_OfficialTaskId", "OfficialTaskId")]
     public class TaskInfo : DomainObject
     {
         public TaskInfo()
@@ -478,13 +491,39 @@ namespace Midjourney.Base.Models
             try
             {
                 // 保存图片
-                StorageHelper.DownloadFile(this);
+                StorageHelper.DownloadFile(this).ConfigureAwait(false).GetAwaiter().GetResult();
             }
             catch (Exception ex)
             {
                 Log.Error(ex, "保存图片失败 {@0}", ImageUrl);
             }
 
+            SuccessUpdate();
+        }
+
+        /// <summary>
+        /// 异步保存成功
+        /// </summary>
+        /// <returns></returns>
+        public async Task SuccessAsync()
+        {
+            try
+            {
+                // 保存图片
+                await StorageHelper.DownloadFile(this);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "保存图片失败 {@0}", ImageUrl);
+            }
+            SuccessUpdate();
+        }
+
+        /// <summary>
+        /// 更新后的操作
+        /// </summary>
+        private void SuccessUpdate()
+        {
             // 调整图片 ACTION
             // 如果是 show 时
             if (Action == TaskAction.SHOW)
