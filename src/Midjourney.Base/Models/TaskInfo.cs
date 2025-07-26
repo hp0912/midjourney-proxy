@@ -45,9 +45,10 @@ namespace Midjourney.Base.Models
     [Index("i_Status", "Status")]
     [Index("i_Action", "Action")]
     [Index("i_ParentId", "ParentId")]
-    [Index("i_SubmitTime_UserId", "Group,UserId")]
+    [Index("i_SubmitTime_UserId", "SubmitTime,UserId")]
     [Index("i_SubmitTime_InstanceId", "SubmitTime,InstanceId")]
     [Index("i_State", "State")]
+    [Index("i_Mode", "Mode")]
     [Index("i_Nonce", "Nonce")]
     //[Index("i_Prompt", "Prompt")]
     //[Index("i_PromptEn", "PromptEn")]
@@ -203,6 +204,12 @@ namespace Midjourney.Base.Models
         public string ImageUrl { get; set; }
 
         /// <summary>
+        /// 基础图片 URL/垫图 URL
+        /// </summary>
+        [Column(StringLength = 1024)]
+        public string BaseImageUrl { get; set; }
+
+        /// <summary>
         /// 图像URL列表
         /// </summary>
         [JsonMap]
@@ -229,6 +236,11 @@ namespace Midjourney.Base.Models
         /// 是否为悠船任务
         /// </summary>
         public bool IsPartner { get; set; }
+
+        /// <summary>
+        /// 是否为悠船放松模式任务
+        /// </summary>
+        public bool IsPartnerRelax => IsPartner && Mode == GenerationSpeedMode.RELAX;
 
         /// <summary>
         /// 悠船任务 ID
@@ -332,7 +344,11 @@ namespace Midjourney.Base.Models
         public string ReplicateTarget { get; set; }
 
         /// <summary>
-        /// 当前绘画客户端指定的速度模式
+        /// 当前绘画的速度模式
+        /// 1、优先从路劲获取指定的速度
+        /// 2、如果路径没有指定速度，则从执行结果中获取速度模式
+        /// 3、变化任务时，默认取父级的速度模式
+        /// 4、如果任务成功后，依然没有速度，则默认为 FAST
         /// </summary>
         public GenerationSpeedMode? Mode { get; set; }
 
@@ -391,66 +407,65 @@ namespace Midjourney.Base.Models
         [Column(IsIgnore = true)]
         public int? ImageWidth => Width;
 
-        /// <summary>
-        /// 获取当前绘图的速度模式
-        /// </summary>
-        /// <returns></returns>
-        public GenerationSpeedMode? GetMode()
-        {
-            // 如果自身有速度模式
-            if (Mode != null)
-            {
-                return Mode;
-            }
+        ///// <summary>
+        ///// 获取当前绘图的速度模式
+        ///// </summary>
+        ///// <returns></returns>
+        //public GenerationSpeedMode? GetMode()
+        //{
+        //    // 如果自身有速度模式
+        //    if (Mode != null)
+        //    {
+        //        return Mode;
+        //    }
 
-            // 如果过滤参数中有速度模式，则直接返回
-            if (AccountFilter != null && AccountFilter.Modes?.Count > 0)
-            {
-                return AccountFilter.Modes.FirstOrDefault();
-            }
+        //    // 如果过滤参数中有速度模式，则直接返回
+        //    if (AccountFilter != null && AccountFilter.Modes?.Count > 0)
+        //    {
+        //        return AccountFilter.Modes.FirstOrDefault();
+        //    }
 
-            if (!string.IsNullOrWhiteSpace(Prompt))
-            {
-                // 解析提示词
-                var prompt = Prompt.ToLower();
+        //    if (!string.IsNullOrWhiteSpace(Prompt))
+        //    {
+        //        // 解析提示词
+        //        var prompt = Prompt.ToLower();
 
-                // 解析速度模式
-                if (prompt.Contains("--fast"))
-                {
-                    return GenerationSpeedMode.FAST;
-                }
-                else if (prompt.Contains("--relax"))
-                {
-                    return GenerationSpeedMode.RELAX;
-                }
-                else if (prompt.Contains("--turbo"))
-                {
-                    return GenerationSpeedMode.TURBO;
-                }
-                else
-                {
-                    return null;
-                }
-            }
+        //        // 解析速度模式
+        //        if (prompt.Contains("--fast"))
+        //        {
+        //            return GenerationSpeedMode.FAST;
+        //        }
+        //        else if (prompt.Contains("--relax"))
+        //        {
+        //            return GenerationSpeedMode.RELAX;
+        //        }
+        //        else if (prompt.Contains("--turbo"))
+        //        {
+        //            return GenerationSpeedMode.TURBO;
+        //        }
+        //        else
+        //        {
+        //            return null;
+        //        }
+        //    }
 
-            return null;
-        }
+        //    return null;
+        //}
 
-        /// <summary>
-        /// 获取当前绘图的速度模式字符串表示。
-        /// </summary>
-        /// <returns></returns>
-        public string GetModeString()
-        {
-            return Mode switch
-            {
-                GenerationSpeedMode.FAST => "fast",
-                GenerationSpeedMode.RELAX => "relax",
-                GenerationSpeedMode.TURBO => "turbo",
-                _ => "relax"
-            };
-        }
-
+        ///// <summary>
+        ///// 获取当前绘图的速度模式字符串表示。
+        ///// </summary>
+        ///// <returns></returns>
+        //public string GetModeString()
+        //{
+        //    return Mode switch
+        //    {
+        //        GenerationSpeedMode.FAST => "fast",
+        //        GenerationSpeedMode.RELAX => "relax",
+        //        GenerationSpeedMode.TURBO => "turbo",
+        //        _ => "relax"
+        //    };
+        //}
 
         /// <summary>
         /// 视频生成原始图像URL
@@ -472,6 +487,30 @@ namespace Midjourney.Base.Models
         /// </summary>
         [JsonMap]
         public List<TaskInfoVideoUrl> VideoUrls { get; set; }
+
+        /// <summary>
+        /// 耗时
+        /// </summary>
+        [LiteDB.BsonIgnore]
+        [MongoDB.Bson.Serialization.Attributes.BsonIgnore]
+        [Column(IsIgnore = true)]
+        public string UseTime
+        {
+            get
+            {
+                if (StartTime.HasValue && FinishTime.HasValue)
+                {
+                    var duration = FinishTime.Value - StartTime.Value;
+                    if (duration < 0)
+                    {
+                        duration = 0; // 确保不会出现负数
+                    }
+
+                    return $"{duration / 1000.0:F2} s";
+                }
+                return "-";
+            }
+        }
 
         /// <summary>
         /// 启动任务。
@@ -553,6 +592,34 @@ namespace Midjourney.Base.Models
             Status = TaskStatus.SUCCESS;
             Progress = "100%";
 
+            // 根据最终提示词更新速度模式
+            var finalPrompt = GetProperty(Constants.TASK_PROPERTY_FINAL_PROMPT, "");
+            if (!string.IsNullOrWhiteSpace(finalPrompt))
+            {
+                // 解析提示词
+                var prompt = finalPrompt.ToLower();
+
+                // 解析速度模式
+                if (prompt.Contains("--fast"))
+                {
+                    Mode = GenerationSpeedMode.FAST;
+                }
+                else if (prompt.Contains("--relax"))
+                {
+                    Mode = GenerationSpeedMode.RELAX;
+                }
+                else if (prompt.Contains("--turbo"))
+                {
+                    Mode = GenerationSpeedMode.TURBO;
+                }
+            }
+
+            // 如果没有解析到，则使用默认值
+            if (Mode == null)
+            {
+                Mode = GenerationSpeedMode.FAST;
+            }
+
             UpdateUserDrawCount();
         }
 
@@ -562,6 +629,11 @@ namespace Midjourney.Base.Models
         /// <param name="reason">失败原因。</param>
         public void Fail(string reason)
         {
+            if (reason?.Length > 4000)
+            {
+                reason = reason.Substring(0, 4000); // 限制失败原因长度
+            }
+
             FinishTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
             Status = TaskStatus.FAILURE;
             FailReason = reason;
@@ -610,30 +682,32 @@ namespace Midjourney.Base.Models
         {
             try
             {
-                if (!string.IsNullOrWhiteSpace(UserId))
-                {
-                    var model = DbHelper.Instance.UserStore.Get(UserId);
-                    if (model != null)
-                    {
-                        if (model.TotalDrawCount <= 0)
-                        {
-                            // 重新计算
-                            model.TotalDrawCount = (int)DbHelper.Instance.TaskStore.Count(x => x.UserId == UserId);
-                        }
-                        else
-                        {
-                            model.TotalDrawCount += 1;
-                        }
+                DrawCounter.Success(this);
 
-                        // 今日日期
-                        var nowDate = new DateTimeOffset(DateTime.Now.Date).ToUnixTimeMilliseconds();
+                //if (!string.IsNullOrWhiteSpace(UserId))
+                //{
+                //    var model = DbHelper.Instance.UserStore.Get(UserId);
+                //    if (model != null)
+                //    {
+                //        if (model.TotalDrawCount <= 0)
+                //        {
+                //            // 重新计算
+                //            model.TotalDrawCount = (int)DbHelper.Instance.TaskStore.Count(x => x.UserId == UserId);
+                //        }
+                //        else
+                //        {
+                //            model.TotalDrawCount += 1;
+                //        }
 
-                        // 计算今日绘图次数
-                        model.DayDrawCount = (int)DbHelper.Instance.TaskStore.Count(x => x.SubmitTime >= nowDate && x.UserId == UserId);
+                //        // 今日日期
+                //        var nowDate = new DateTimeOffset(DateTime.Now.Date).ToUnixTimeMilliseconds();
 
-                        DbHelper.Instance.UserStore.Update("DayDrawCount,TotalDrawCount", model);
-                    }
-                }
+                //        // 计算今日绘图次数
+                //        model.DayDrawCount = (int)DbHelper.Instance.TaskStore.Count(x => x.SubmitTime >= nowDate && x.UserId == UserId);
+
+                //        DbHelper.Instance.UserStore.Update("DayDrawCount,TotalDrawCount", model);
+                //    }
+                //}
             }
             catch (Exception ex)
             {
@@ -798,12 +872,12 @@ namespace Midjourney.Base.Models
     public class TaskInfoVideoUrl
     {
         /// <summary>
-        /// 
+        ///
         /// </summary>
         public string Url { get; set; } = string.Empty;
 
         /// <summary>
-        /// 
+        ///
         /// </summary>
         public List<CustomComponentModel> Buttons { get; set; } = new List<CustomComponentModel>();
     }

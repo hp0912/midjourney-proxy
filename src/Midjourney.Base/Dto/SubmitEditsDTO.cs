@@ -21,52 +21,31 @@
 // The use of this software for any form of illegal face swapping,
 // invasion of privacy, or any other unlawful purposes is strictly prohibited. 
 // Violation of these terms may result in termination of the license and may subject the violator to legal action.
+using Swashbuckle.AspNetCore.Annotations;
+
 namespace Midjourney.Base.Dto
 {
     /// <summary>
-    /// 基础提交参数类。
+    /// Edit 提交参数。
     /// </summary>
-    public abstract class BaseSubmitDTO
+    [SwaggerSchema("Edit 提交参数")]
+    public class SubmitEditsDTO : BaseSubmitDTO
     {
         /// <summary>
-        /// 自定义参数。
+        /// 提示词。
         /// </summary>
-        public string State { get; set; }
+        [SwaggerSchema("提示词", Description = "Cat")]
+        public string Prompt { get; set; }
 
         /// <summary>
-        /// 回调地址, 为空时使用全局notifyHook。
+        /// 合成的图片 url/base64
         /// </summary>
-        public string NotifyHook { get; set; }
-    }
-
-    /// <summary>
-    /// 账号筛选
-    /// </summary>
-    public class AccountFilter
-    {
-        /// <summary>
-        /// 过滤指定实例的账号
-        /// </summary>
-        public string InstanceId { get; set; }
+        [SwaggerSchema("图片url/base64", Description = "url/data:image/png;base64,xxx")]
+        public string Image { get; set; }
 
         /// <summary>
-        /// 过滤账号模式 RELAX | FAST | TURBO
+        /// 账号过滤
         /// </summary>
-        public List<GenerationSpeedMode> Modes { get; set; } = [];
-
-        /// <summary>
-        /// 账号是否 remix（Midjourney Remix）
-        /// </summary>
-        public bool? Remix { get; set; }
-
-        /// <summary>
-        /// 账号是否 remix（Nijiourney Remix）
-        /// </summary>
-        public bool? NijiRemix { get; set; }
-
-        /// <summary>
-        /// 账号过滤时，remix 自动提交视为账号的 remix 为 false
-        /// </summary>
-        public bool? RemixAutoConsidered { get; set; }
+        public AccountFilter AccountFilter { get; set; }
     }
 }

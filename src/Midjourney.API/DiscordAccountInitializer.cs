@@ -52,7 +52,7 @@ namespace Midjourney.API
         private readonly IUpgradeService _upgradeService;
 
         private Timer _timer;
-        private DateTime? _userDayReset = null;
+        //private DateTime? _userDayReset = null;
         private DateTime? _upgradeTime = null;
 
         public DiscordAccountInitializer(
@@ -381,26 +381,12 @@ namespace Midjourney.API
                 {
                     try
                     {
-                        // 每日 0 点清除用户日绘图统计
-                        if (_userDayReset == null || _userDayReset.Value.Date != DateTime.Now.Date)
-                        {
-                            // 获取日绘图数量 > 0 的用户
-                            var users = DbHelper.Instance.UserStore.Where(c => c.DayDrawCount > 0).ToList();
-                            foreach (var user in users)
-                            {
-                                user.DayDrawCount = 0;
-                                DbHelper.Instance.UserStore.Update("DayDrawCount", user);
-                            }
-
-                            _userDayReset = DateTime.Now.Date;
-                        }
-
                         var now = new DateTimeOffset(DateTime.Now.Date).ToUnixTimeMilliseconds();
 
                         GlobalConfiguration.TodayDraw = (int)DbHelper.Instance.TaskStore.Count(x => x.SubmitTime >= now);
                         GlobalConfiguration.TotalDraw = (int)DbHelper.Instance.TaskStore.Count(x => true);
 
-                        // 验证许可证密钥
+                        // 验证许可
                         await LicenseKeyHelper.Validate();
 
                         // 初始化
@@ -558,6 +544,8 @@ namespace Midjourney.API
                 {
                     try
                     {
+                        DrawCounter.InitAccountTodayCounter(account.ChannelId);
+
                         await StartCheckAccount(account, false);
                     }
                     catch (Exception ex)
@@ -1013,9 +1001,9 @@ namespace Midjourney.API
                 model.CfUrl = null;
 
                 // 验证 Interval
-                if (param.Interval < 1.2m)
+                if (param.Interval < 0m)
                 {
-                    param.Interval = 1.2m;
+                    param.Interval = 0m;
                 }
 
                 // 最大并行数
@@ -1080,6 +1068,9 @@ namespace Midjourney.API
                 model.RemixAutoSubmit = param.RemixAutoSubmit;
                 model.CoreSize = param.CoreSize;
                 model.QueueSize = param.QueueSize;
+                model.RelaxQueueSize = param.RelaxQueueSize;
+                model.RelaxCoreSize = param.RelaxCoreSize;
+
                 model.TimeoutMinutes = param.TimeoutMinutes;
                 model.Weight = param.Weight;
                 model.Remark = param.Remark;

@@ -755,6 +755,146 @@ namespace Midjourney.API.Controllers
         }
 
         /// <summary>
+        /// 提交编辑任务
+        /// https://apiai.apifox.cn/api-314970543
+        /// </summary>
+        /// <param name="editsDTO"></param>
+        /// <returns></returns>
+        [HttpPost("edit")]
+        [HttpPost("edits")]
+        public ActionResult<SubmitResultVO> Edits([FromBody] SubmitEditsDTO editsDTO)
+        {
+            if (string.IsNullOrWhiteSpace(editsDTO.Image) || string.IsNullOrWhiteSpace(editsDTO.Prompt))
+            {
+                return Ok(SubmitResultVO.Fail(ReturnCode.VALIDATION_ERROR, "image或prompt不能为空"));
+            }
+
+            var setting = GlobalConfiguration.Setting;
+            if (!setting.EnableUserCustomUploadBase64)
+            {
+                return Ok(SubmitResultVO.Fail(ReturnCode.VALIDATION_ERROR, "禁止上传"));
+            }
+
+            DataUrl dataUrl;
+            try
+            {
+                // 如果是 http 开头
+                if (editsDTO.Image.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                {
+                    dataUrl = new DataUrl { Url = editsDTO.Image };
+                }
+                else
+                {
+                    // 否则是 base64
+                    editsDTO.Image = editsDTO.Image.Trim();
+                    if (!editsDTO.Image.StartsWith("data:"))
+                    {
+                        editsDTO.Image = "data:image/png;base64," + editsDTO.Image;
+                    }
+                    dataUrl = DataUrl.Parse(editsDTO.Image);
+                }
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(e, "base64格式转换异常");
+                return Ok(SubmitResultVO.Fail(ReturnCode.VALIDATION_ERROR, "base64格式错误"));
+            }
+
+            var task = NewTask(editsDTO);
+            var promptEn = TranslatePrompt(editsDTO.Prompt, task.RealBotType ?? task.BotType);
+
+            try
+            {
+                _taskService.CheckBanned(promptEn);
+            }
+            catch (BannedPromptException e)
+            {
+                return Ok(SubmitResultVO.Fail(ReturnCode.BANNED_PROMPT, "可能包含敏感词")
+                    .SetProperty("promptEn", promptEn)
+                    .SetProperty("bannedWord", e.Message));
+            }
+
+            task.BotType = EBotType.MID_JOURNEY;
+            task.Action = TaskAction.EDIT;
+            task.Description = $"/edit {promptEn}";
+            task.Prompt = editsDTO.Prompt;
+            task.PromptEn = promptEn;
+
+            NewTaskDoFilter(task, editsDTO.AccountFilter);
+
+            return Ok(_taskService.SubmitEdit(task, dataUrl));
+        }
+
+        /// <summary>
+        /// 提交转绘任务
+        /// </summary>
+        /// <param name="editsDTO"></param>
+        /// <returns></returns>
+        [HttpPost("retexture")]
+        public ActionResult<SubmitResultVO> Retexture([FromBody] SubmitEditsDTO editsDTO)
+        {
+            if (string.IsNullOrWhiteSpace(editsDTO.Image) || string.IsNullOrWhiteSpace(editsDTO.Prompt))
+            {
+                return Ok(SubmitResultVO.Fail(ReturnCode.VALIDATION_ERROR, "image或prompt不能为空"));
+            }
+
+            var setting = GlobalConfiguration.Setting;
+            if (!setting.EnableUserCustomUploadBase64)
+            {
+                return Ok(SubmitResultVO.Fail(ReturnCode.VALIDATION_ERROR, "禁止上传"));
+            }
+
+            DataUrl dataUrl;
+            try
+            {
+                // 如果是 http 开头
+                if (editsDTO.Image.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                {
+                    dataUrl = new DataUrl { Url = editsDTO.Image };
+                }
+                else
+                {
+                    // 否则是 base64
+                    editsDTO.Image = editsDTO.Image.Trim();
+                    if (!editsDTO.Image.StartsWith("data:"))
+                    {
+                        editsDTO.Image = "data:image/png;base64," + editsDTO.Image;
+                    }
+                    dataUrl = DataUrl.Parse(editsDTO.Image);
+                }
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(e, "base64格式转换异常");
+                return Ok(SubmitResultVO.Fail(ReturnCode.VALIDATION_ERROR, "base64格式错误"));
+            }
+
+            var task = NewTask(editsDTO);
+            var promptEn = TranslatePrompt(editsDTO.Prompt, task.RealBotType ?? task.BotType);
+
+            try
+            {
+                _taskService.CheckBanned(promptEn);
+            }
+            catch (BannedPromptException e)
+            {
+                return Ok(SubmitResultVO.Fail(ReturnCode.BANNED_PROMPT, "可能包含敏感词")
+                    .SetProperty("promptEn", promptEn)
+                    .SetProperty("bannedWord", e.Message));
+            }
+
+            task.BotType = EBotType.MID_JOURNEY;
+            task.Action = TaskAction.RETEXTURE;
+            task.Description = $"/retexture {promptEn}";
+            task.Prompt = editsDTO.Prompt;
+            task.PromptEn = promptEn;
+
+            NewTaskDoFilter(task, editsDTO.AccountFilter);
+
+            return Ok(_taskService.SubmitRetexture(task, dataUrl));
+        }
+
+        /// <summary>
         /// 创建新的任务对象
         /// </summary>
         /// <param name="baseDTO"></param>
@@ -1003,18 +1143,25 @@ namespace Midjourney.API.Controllers
                 task.AccountFilter = new AccountFilter();
             }
 
-            // 如果路径中有速度模式
-            if (_mode != null)
+            // 如果没有路径速度，并且没有过滤速度，解析提示词，生成指定模式过滤
+            if (task.Mode == null && task.AccountFilter.Modes.Count == 0)
             {
-                if (!task.AccountFilter.Modes.Contains(_mode.Value))
-                {
-                    task.AccountFilter.Modes.Add(_mode.Value);
-                }
-            }
+                // 解析提示词
+                var prompt = task.Prompt?.ToLower() ?? "";
 
-            if (task.Mode == null)
-            {
-                task.Mode = task.GetMode();
+                // 解析速度模式
+                if (prompt.Contains("--fast"))
+                {
+                    task.Mode = GenerationSpeedMode.FAST;
+                }
+                else if (prompt.Contains("--relax"))
+                {
+                    task.Mode = GenerationSpeedMode.RELAX;
+                }
+                else if (prompt.Contains("--turbo"))
+                {
+                    task.Mode = GenerationSpeedMode.TURBO;
+                }
             }
         }
 
