@@ -131,7 +131,7 @@ The most powerful, complete, full-featured, completely free and open source Midj
 - 自动验证/自动登录服务器地址：<http://47.76.110.222:8081>
 - 自动验证/自动登录服务器文档：<http://47.76.110.222:8081/swagger>
 
-> 由于公益验证器，受到大量恶意攻击，目前已暂停服务，如有需要请自行部署验证器。
+> 由于公益验证器，受到大量恶意攻击，目前已暂停自动登录服务，如有需要自动登录请自行部署验证器。
 
 ## 预览截图
 
@@ -243,7 +243,7 @@ docker run --name mjopen -d --restart=always \
  trueaiorg/midjourney-proxy
 ```
 
-> Windows 版本
+> Windows 版本（arm版本停止支持）
 
 ```bash
 a. 通过 https://github.com/trueai-org/midjourney-proxy/releases 下载 windows 最新免安装版，例如：midjourney-proxy-win-x64.zip
@@ -253,7 +253,7 @@ d. 部署到 IIS（可选），在 IIS 添加网站，将文件夹部署到 IIS�
 e. 使用系统自带的 `任务计划程序`（可选），创建基本任务，选择 `.exe` 程序即可，请选择`请勿启动多个实例`，保证只有一个任务执行即可。
 ```
 
-> Linux 版本
+> Linux 版本（arm版本停止支持）
 
 ```bash
 a. 通过 https://github.com/trueai-org/midjourney-proxy/releases 下载 linux 最新免安装版，例如：midjourney-proxy-linux-x64.zip
@@ -263,7 +263,7 @@ c. 启动方式1: sh run_app.sh
 d. 启动方式2: chmod +x run_app.sh && ./run_app.sh
 ```
 
-> macOS 版本
+> macOS 版本（arm版本停止支持）
 
 ```bash
 a. 通过 https://github.com/trueai-org/midjourney-proxy/releases 下载 macOS 最新免安装版，例如：midjourney-proxy-osx-x64.zip
@@ -422,6 +422,7 @@ docker run -d \
 {
   "Demo": null, // 网站配置为演示模式
   "Captcha": {
+    "IsLoginService": true, // 是否启用登录服务
     "Concurrent": 1, // 并发数
     "Headless": true, // chrome 是否后台运行
     "TwoCaptchaKey": "", // 2captcha.com 的 API Key
