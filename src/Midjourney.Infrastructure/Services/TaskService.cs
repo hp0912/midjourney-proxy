@@ -1523,6 +1523,7 @@ namespace Midjourney.Infrastructure.Services
                         PromptEn = prompt,
                         Status = TaskStatus.NOT_START,
                         Mode = task.Mode,
+                        RequestMode = task.RequestMode,
                         RemixAutoSubmit = true,
                         SubInstanceId = task.SubInstanceId,
                     };
@@ -1676,16 +1677,14 @@ namespace Midjourney.Infrastructure.Services
                 }
             }
 
-            if (task.IsPartner || task.IsOfficial)
-            {
-                _taskStoreService.Save(task);
-            }
+    
 
             return discordInstance.SubmitTaskAsync(task, async () =>
             {
                 // 悠船 | 官方
                 if (task.IsPartner || task.IsOfficial)
                 {
+                    _taskStoreService.Save(task);
                     return await discordInstance.YmTaskService.SubmitActionAsync(task, submitAction, targetTask, _taskStoreService, discordInstance);
                 }
                 else
