@@ -28,7 +28,6 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using LiteDB;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -1357,7 +1356,7 @@ namespace Midjourney.API.Controllers
                 }
             }
 
-            var counter = DrawCounter.AccountTodayCounter;
+            var counter = DrawCounter.AccountTodaySuccessCounter;
             foreach (var item in list)
             {
                 var inc = _loadBalancer.GetDiscordInstance(item.ChannelId);
@@ -1371,7 +1370,7 @@ namespace Midjourney.API.Controllers
                 // 是否运行中
                 item.Running = inc?.IsAlive ?? false;
 
-                // 计算今日绘图统计
+                // 计算今日绘图统计（成功）
                 var drawKey = $"{DateTime.Now.Date:yyyyMMdd}_{item.ChannelId}";
                 if (counter.TryGetValue(drawKey, out var counterValue))
                 {
@@ -1390,6 +1389,10 @@ namespace Midjourney.API.Controllers
                         item.TodayRelaxDrawCount = relaxs.Sum(x => x.Value);
                     }
                 }
+
+                // 计算今日累计绘图（包含失败，不包含放大）
+                item.DayFastCount = DrawCounter.GetAccountTodayTotalCount(item.ChannelId, GenerationSpeedMode.FAST);
+                item.DayRelaxCount = DrawCounter.GetAccountTodayTotalCount(item.ChannelId, GenerationSpeedMode.RELAX);
 
                 if (user == null || (user.Role != EUserRole.ADMIN && user.Id != item.SponsorUserId))
                 {
@@ -1715,7 +1718,7 @@ namespace Midjourney.API.Controllers
             }
 
             // 统计今日绘图数量
-            var drawCounter = DrawCounter.UserTodayCounter;
+            var drawCounter = DrawCounter.UserTodadSuccessCounter;
 
 
             foreach (var item in list)

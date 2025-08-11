@@ -51,17 +51,17 @@ namespace Midjourney.Base.Models
     [Index("i_State", "State")]
     [Index("i_Mode", "Mode")]
     [Index("i_Nonce", "Nonce")]
-    //[Index("i_Prompt", "Prompt")]
-    //[Index("i_PromptEn", "PromptEn")]
-    //[Index("i_PromptFull", "PromptFull")]
-    //[Index("i_Description", "Description")]
-    //[Index("i_FailReason", "FailReason")]
     [Index("i_IsPartner", "IsPartner")]
     [Index("i_PartnerTaskId", "PartnerTaskId")]
     [Index("i_IsOfficial", "IsOfficial")]
     [Index("i_OfficialTaskId", "OfficialTaskId")]
     public class TaskInfo : DomainObject
     {
+        /// <summary>
+        /// Midjourney CDN 域名
+        /// </summary>
+        public const string MIDJOURNEY_CDN = "cdn.midjourney.com";
+
         /// <summary>
         /// 版本号匹配正则表达式。
         /// </summary>
@@ -224,7 +224,7 @@ namespace Midjourney.Base.Models
         /// 图像URL列表
         /// </summary>
         [JsonMap]
-        public List<TaskInfoImageUrl> ImageUrls { get; set; } = [];
+        public List<TaskInfoImageUrl> ImageUrls { get; set; }
 
         /// <summary>
         /// 缩略图 url
@@ -536,6 +536,14 @@ namespace Midjourney.Base.Models
         public string Version { get; set; }
 
         /// <summary>
+        /// 存储选项（私人定制）
+        /// 请求头 x-storage-options: 1 | 2, 1: 返回官方链接, 2: 返回合作商链接
+        /// </summary>
+        public EStorageOption? StorageOption { get; set; }
+
+        // ------------------------------------- 方法 --------------------------------------
+
+        /// <summary>
         /// 启动任务。
         /// </summary>
         public void Start()
@@ -564,7 +572,7 @@ namespace Midjourney.Base.Models
         }
 
         /// <summary>
-        /// 异步保存成功
+        /// 异步保存成功（自动设置完成）
         /// </summary>
         /// <returns></returns>
         public async Task SuccessAsync()
@@ -612,10 +620,6 @@ namespace Midjourney.Base.Models
                 }
             }
 
-            FinishTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-            Status = TaskStatus.SUCCESS;
-            Progress = "100%";
-
             // 根据最终提示词更新速度模式
             var finalPrompt = GetProperty(Constants.TASK_PROPERTY_FINAL_PROMPT, "");
             if (!string.IsNullOrWhiteSpace(finalPrompt))
@@ -624,15 +628,15 @@ namespace Midjourney.Base.Models
                 var prompt = finalPrompt.ToLower();
 
                 // 解析速度模式
-                if (prompt.Contains("--fast"))
+                if (prompt.Contains("--fast", StringComparison.OrdinalIgnoreCase))
                 {
                     Mode = GenerationSpeedMode.FAST;
                 }
-                else if (prompt.Contains("--relax"))
+                else if (prompt.Contains("--relax", StringComparison.OrdinalIgnoreCase))
                 {
                     Mode = GenerationSpeedMode.RELAX;
                 }
-                else if (prompt.Contains("--turbo"))
+                else if (prompt.Contains("--turbo", StringComparison.OrdinalIgnoreCase))
                 {
                     Mode = GenerationSpeedMode.TURBO;
                 }
@@ -659,7 +663,12 @@ namespace Midjourney.Base.Models
                 SetProperty(Constants.TASK_PROPERTY_FINAL_PROMPT, finalPrompt);
             }
 
-            UpdateUserDrawCount();
+            UpdateUserDrawCount(true);
+
+            // 最后才设置完成时间和状态
+            FinishTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+            Status = TaskStatus.SUCCESS;
+            Progress = "100%";
         }
 
         /// <summary>
@@ -672,11 +681,6 @@ namespace Midjourney.Base.Models
             {
                 reason = reason.Substring(0, 4000); // 限制失败原因长度
             }
-
-            FinishTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-            Status = TaskStatus.FAILURE;
-            FailReason = reason;
-            Progress = "";
 
             if (!string.IsNullOrWhiteSpace(reason))
             {
@@ -711,46 +715,26 @@ namespace Midjourney.Base.Models
                 }
             }
 
-            UpdateUserDrawCount();
+            UpdateUserDrawCount(false);
+
+            FinishTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+            Status = TaskStatus.FAILURE;
+            FailReason = reason;
+            Progress = "";
         }
 
         /// <summary>
-        /// 更新用户绘图次数。
+        /// 统计用户绘图次数。
         /// </summary>
-        public void UpdateUserDrawCount()
+        public void UpdateUserDrawCount(bool success)
         {
             try
             {
-                DrawCounter.Success(this);
-
-                //if (!string.IsNullOrWhiteSpace(UserId))
-                //{
-                //    var model = DbHelper.Instance.UserStore.Get(UserId);
-                //    if (model != null)
-                //    {
-                //        if (model.TotalDrawCount <= 0)
-                //        {
-                //            // 重新计算
-                //            model.TotalDrawCount = (int)DbHelper.Instance.TaskStore.Count(x => x.UserId == UserId);
-                //        }
-                //        else
-                //        {
-                //            model.TotalDrawCount += 1;
-                //        }
-
-                //        // 今日日期
-                //        var nowDate = new DateTimeOffset(DateTime.Now.Date).ToUnixTimeMilliseconds();
-
-                //        // 计算今日绘图次数
-                //        model.DayDrawCount = (int)DbHelper.Instance.TaskStore.Count(x => x.SubmitTime >= nowDate && x.UserId == UserId);
-
-                //        DbHelper.Instance.UserStore.Update("DayDrawCount,TotalDrawCount", model);
-                //    }
-                //}
+                DrawCounter.Complete(this, success);
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "更新用户绘图次数失败");
+                Log.Error(ex, "统计绘图次数失败");
             }
         }
 
@@ -1037,6 +1021,96 @@ namespace Midjourney.Base.Models
 
             // 默认返回 v 7
             return "v 7";
+        }
+
+        /// <summary>
+        /// 计算最大公约数（GCD）
+        /// </summary>
+        /// <param name="value1"></param>
+        /// <param name="value2"></param>
+        /// <returns></returns>
+        public int GCD(int value1, int value2)
+        {
+            while (value2 != 0)
+            {
+                var temp = value2;
+                value2 = value1 % value2;
+                value1 = temp;
+            }
+            return value1;
+        }
+
+        /// <summary>
+        /// 转换 URL 为官方链接或合作商链接。
+        /// </summary>
+        /// <param name="sourceUrl"></param>
+        /// <param name="newUrl"></param>
+        /// <returns></returns>
+        public string TransformUrl(string sourceUrl, string newUrl = null)
+        {
+            // 悠船
+            if (IsPartner)
+            {
+                if (!string.IsNullOrWhiteSpace(sourceUrl))
+                {
+                    if (StorageOption == EStorageOption.Partner)
+                    {
+                        return sourceUrl;
+                    }
+                    else if (StorageOption == EStorageOption.Official)
+                    {
+                        // 转为官方链接
+                        var uri = new Uri(sourceUrl);
+
+                        // https://youchuan-imagine.oss-cn-shanghai.aliyuncs.com/16e48f88-e900-4fe3-a9f3-4454e44bf19c_0_2.png
+                        // https://cdn.midjourney.com/16e48f88-e900-4fe3-a9f3-4454e44bf19c/0_1.png
+
+                        // 如果路径符合 /{guid}_{i}_{n}.png 的结尾，使用正则名称提取
+                        var match = Regex.Match(uri.PathAndQuery, @"^/(?<guid>[a-z0-9\-]+)_(?<i>\d+)_(?<n>\d+)\.png$", RegexOptions.IgnoreCase);
+                        if (match.Success)
+                        {
+                            var guid = match.Groups["guid"].Value;
+                            var i = match.Groups["i"].Value;
+                            var n = match.Groups["n"].Value;
+
+                            // 返回官方链接
+                            return $"https://{MIDJOURNEY_CDN}/{guid}/{i}_{n}.png";
+                        }
+
+                        // https://youchuan-imagine.oss-cn-shanghai.aliyuncs.com/e39614f4-a83f-4d39-8402-d807f3a3ca7d_0.mp4
+                        // https://cdn.midjourney.com/video/8809c019-f50d-4502-9436-a2716275d546/0.mp4
+
+                        // 如果路径符合 /{guid}_{i}.mp4 的结尾，使用正则名称提取
+                        match = Regex.Match(uri.PathAndQuery, @"^/(?<guid>[a-z0-9\-]+)_(?<i>\d+)\.mp4$", RegexOptions.IgnoreCase);
+                        if (match.Success)
+                        {
+                            var guid = match.Groups["guid"].Value;
+                            var i = match.Groups["i"].Value;
+
+                            // 返回官方链接
+                            return $"https://{MIDJOURNEY_CDN}/video/{guid}/{i}.mp4";
+                        }
+
+                        return $"https://{MIDJOURNEY_CDN}/{uri.PathAndQuery.TrimStart('/')}";
+                    }
+                }
+            }
+            // 官方
+            else if (IsOfficial)
+            {
+                if (!string.IsNullOrWhiteSpace(sourceUrl))
+                {
+                    if (StorageOption == EStorageOption.Official || StorageOption == EStorageOption.Partner)
+                    {
+                        return sourceUrl;
+                    }
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(newUrl))
+                return sourceUrl;
+
+            return newUrl;
         }
     }
 
