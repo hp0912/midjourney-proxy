@@ -541,6 +541,19 @@ namespace Midjourney.Base.Models
         /// </summary>
         public EStorageOption? StorageOption { get; set; }
 
+        /// <summary>
+        /// 视频分辨率类型
+        /// 取值：vid_1.1_i2v_480 | vid_1.1_i2v_720
+        /// SD: vid_1.1_i2v_480
+        /// HD: vid_1.1_i2v_720
+        /// </summary>
+        public string VideoType { get; set; }
+
+        /// <summary>
+        /// 是否为高清视频
+        /// </summary>
+        public bool IsHdVideo => VideoType == "vid_1.1_i2v_720";
+
         // ------------------------------------- 方法 --------------------------------------
 
         /// <summary>
@@ -839,7 +852,7 @@ namespace Midjourney.Base.Models
         /// <summary>
         /// 设置视频放大按钮。
         /// </summary>
-        public void SetVideoUpscaleButtons(string id)
+        public void SetVideoUpscaleButtons(string id, int videoCount = 4)
         {
             if (string.IsNullOrWhiteSpace(id))
             {
@@ -848,7 +861,7 @@ namespace Midjourney.Base.Models
 
             Buttons.Clear();
 
-            for (int i = 1; i <= 4; i++)
+            for (int i = 1; i <= videoCount; i++)
             {
                 Buttons.Add(new CustomComponentModel
                 {
