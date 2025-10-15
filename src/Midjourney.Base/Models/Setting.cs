@@ -104,6 +104,11 @@ namespace Midjourney.Base.Models
         public bool PrivateEnableYouChuanMergedCustomize { get; set; } = false;
 
         /// <summary>
+        /// 开启官方个性化配置
+        /// </summary>
+        public bool PrivateEnableOfficialPersonalize { get; set; } = false;
+
+        /// <summary>
         /// 悠船绘图时将 prompt 提示词中的链接转为悠船官网链接
         /// </summary>
         public bool EnableYouChuanPromptLink { get; set; }
@@ -413,12 +418,6 @@ namespace Midjourney.Base.Models
         /// 启用转换官方链接，上传到 discord 服务器
         /// </summary>
         public bool EnableConvertOfficialLink { get; set; } = true;
-
-        /// <summary>
-        /// 启用转换云/加速链接/OSS/COS/CDN
-        /// </summary>
-        [Obsolete("废弃")]
-        public bool EnableConvertAliyunLink { get; set; }
 
         /// <summary>
         /// 保存用户上传的 link 到文件存储（例如：describe）
@@ -992,6 +991,11 @@ namespace Midjourney.Base.Models
         /// 是否为官方账号
         /// </summary>
         public bool IsOfficial { get; set; }
+
+        /// <summary>
+        /// 官方账号是否启用个性化配置 - 启用后可以使用此账号生成个性化配置 -p 参数
+        /// </summary>
+        public bool OfficialEnablePersonalize { get; set; } = false;
 
         /// <summary>
         /// 启用高清视频（Pro or Mega 以上套餐，可以开启此功能）
