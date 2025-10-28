@@ -25,6 +25,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
+using Amazon.Runtime.Internal.Endpoints.StandardLibrary;
 using Microsoft.Extensions.Caching.Memory;
 using Midjourney.Infrastructure.LoadBalancer;
 using Newtonsoft.Json;
@@ -1282,8 +1283,26 @@ namespace Midjourney.Infrastructure.Services
                 else
                 {
                     var finalFileNames = new List<string>();
-                    foreach (var dataUrl in dataUrls)
+                    foreach (var item in dataUrls)
                     {
+                        var dataUrl = item;
+
+                        // discord 混图只能通过 base64
+                        if (dataUrl.Url?.StartsWith("http", StringComparison.OrdinalIgnoreCase) == true)
+                        {
+                            // 将 url 转为 bytes
+                            var ff = new FileFetchHelper();
+                            var res = await ff.FetchFileAsync(dataUrl.Url);
+                            if (res.Success && res.FileBytes?.Length > 0)
+                            {
+                                dataUrl = new DataUrl(res.ContentType, res.FileBytes);
+                            }
+                            else
+                            {
+                                return Message.Failure("Fetch image from url failed: " + dataUrl.Url);
+                            }
+                        }
+
                         var guid = "";
                         if (dataUrls.Count > 0)
                         {
@@ -1299,6 +1318,7 @@ namespace Midjourney.Infrastructure.Services
                         }
 
                         finalFileNames.Add(uploadResult.Description);
+
                     }
 
                     return await discordInstance.BlendAsync(finalFileNames, dimensions,
