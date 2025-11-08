@@ -15,11 +15,11 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 // Additional Terms:
-// This software shall not be used for any illegal activities. 
+// This software shall not be used for any illegal activities.
 // Users must comply with all applicable laws and regulations,
-// particularly those related to image and video processing. 
+// particularly those related to image and video processing.
 // The use of this software for any form of illegal face swapping,
-// invasion of privacy, or any other unlawful purposes is strictly prohibited. 
+// invasion of privacy, or any other unlawful purposes is strictly prohibited.
 // Violation of these terms may result in termination of the license and may subject the violator to legal action.
 
 using Midjourney.Base.Util;
@@ -93,6 +93,7 @@ namespace Midjourney.Base.Data
                         _personalizeTagWordStore = LiteDBHelper.PersonalizeTagStore;
                     }
                     break;
+
                 case DatabaseType.MongoDB:
                     {
                         _taskStore = new MongoDBRepository<TaskInfo>();
@@ -103,6 +104,7 @@ namespace Midjourney.Base.Data
                         _personalizeTagWordStore = new MongoDBRepository<PersonalizeTag>();
                     }
                     break;
+
                 case DatabaseType.SQLite:
                 case DatabaseType.MySQL:
                 case DatabaseType.PostgreSQL:
@@ -116,11 +118,11 @@ namespace Midjourney.Base.Data
                         _personalizeTagWordStore = new FreeSqlRepository<PersonalizeTag>();
                     }
                     break;
+
                 default:
                     break;
             }
         }
-
 
         /// <summary>
         /// 初始化数据库索引
@@ -136,6 +138,7 @@ namespace Midjourney.Base.Data
                     {
                         case DatabaseType.NONE:
                             break;
+
                         case DatabaseType.LiteDB:
                             {
                                 // LiteDB 索引
@@ -168,6 +171,7 @@ namespace Midjourney.Base.Data
                                 //coll.EnsureIndex("ImageUrl", "ImageUrl");
                             }
                             break;
+
                         case DatabaseType.MongoDB:
                             {
                                 // 不能固定大小，因为无法修改数据
@@ -221,14 +225,19 @@ namespace Midjourney.Base.Data
                                 coll.Indexes.CreateOne(index11);
                             }
                             break;
+
                         case DatabaseType.SQLite:
                             break;
+
                         case DatabaseType.MySQL:
                             break;
+
                         case DatabaseType.PostgreSQL:
                             break;
+
                         case DatabaseType.SQLServer:
                             break;
+
                         default:
                             break;
                     }
@@ -241,26 +250,56 @@ namespace Midjourney.Base.Data
         }
 
         /// <summary>
-        /// 验证数据库连接
+        /// 验证并配置数据库连接
         /// </summary>
         /// <returns></returns>
-        public static bool Verify()
+        public static bool VerifyConfigure()
+        {
+            var setting = GlobalConfiguration.Setting;
+
+            if (setting.DatabaseType == DatabaseType.LiteDB)
+            {
+                return true;
+            }
+
+            var isSuccess = Verify(setting.DatabaseType, setting.DatabaseConnectionString, setting.DatabaseName);
+            if (isSuccess)
+            {
+                // 验证成功后，确认配置当前数据库
+                var freeSql = FreeSqlHelper.Init(setting.DatabaseType, setting.DatabaseConnectionString, false);
+                if (freeSql != null)
+                {
+                    FreeSqlHelper.Configure(freeSql);
+                }
+            }
+
+            return isSuccess;
+        }
+
+        /// <summary>
+        /// 验证数据库连接
+        /// </summary>
+        /// <param name="databaseType"></param>
+        /// <param name="databaseConnectionString"></param>
+        /// <param name="databaseName"></param>
+        /// <param name="isConfigure">验证成功后是否配置</param>
+        /// <returns></returns>
+        public static bool Verify(DatabaseType databaseType, string databaseConnectionString, string databaseName = null)
         {
             try
             {
-                var setting = GlobalConfiguration.Setting;
-                if (setting.DatabaseType == DatabaseType.LiteDB)
+                if (databaseType == DatabaseType.LiteDB)
                 {
                     return true;
                 }
 
-                if (!string.IsNullOrWhiteSpace(setting.DatabaseConnectionString))
+                if (!string.IsNullOrWhiteSpace(databaseConnectionString))
                 {
-                    switch (setting.DatabaseType)
+                    switch (databaseType)
                     {
                         case DatabaseType.MongoDB:
                             {
-                                return MongoHelper.Verify();
+                                return MongoHelper.Verify(databaseConnectionString, databaseName);
                             }
                         case DatabaseType.SQLite:
                         case DatabaseType.MySQL:
@@ -268,7 +307,7 @@ namespace Midjourney.Base.Data
                         case DatabaseType.SQLServer:
                             {
                                 // 首次初始化，并同步实体结构
-                                var freeSql = FreeSqlHelper.Init(true);
+                                var freeSql = FreeSqlHelper.Init(databaseType, databaseConnectionString, true);
                                 if (freeSql != null)
                                 {
                                     var obj = freeSql.Ado.ExecuteScalar("SELECT 1");
@@ -296,13 +335,6 @@ namespace Midjourney.Base.Data
 
                                         freeSql.CodeFirst.SyncStructure(typeof(PersonalizeTag));
 
-                                        // 验证成功后，确认配置当前数据库
-                                        freeSql = FreeSqlHelper.Init(false);
-                                        if (freeSql != null)
-                                        {
-                                            FreeSqlHelper.Configure(freeSql);
-                                        }
-
                                         return succees;
                                     }
                                 }
@@ -318,6 +350,7 @@ namespace Midjourney.Base.Data
             {
                 Log.Error(ex, "数据库连接验证失败");
             }
+
             return false;
         }
     }

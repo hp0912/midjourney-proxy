@@ -83,17 +83,17 @@ namespace Midjourney.API
             }
             GlobalConfiguration.Setting = setting;
 
-            // 原始 Mongo 配置，旧版数据库配置
-            if (setting.DatabaseType == DatabaseType.NONE)
-            {
-                if (MongoHelper.OldVerify())
-                {
-                    // 将原始 Mongo 配置转换为新配置
-                    setting.DatabaseConnectionString = setting.MongoDefaultConnectionString;
-                    setting.DatabaseName = setting.MongoDefaultDatabase;
-                    setting.DatabaseType = DatabaseType.MongoDB;
-                }
-            }
+            //// 原始 Mongo 配置，旧版数据库配置
+            //if (setting.DatabaseType == DatabaseType.NONE)
+            //{
+            //    if (MongoHelper.OldVerify())
+            //    {
+            //        // 将原始 Mongo 配置转换为新配置
+            //        setting.DatabaseConnectionString = setting.MongoDefaultConnectionString;
+            //        setting.DatabaseName = setting.MongoDefaultDatabase;
+            //        setting.DatabaseType = DatabaseType.MongoDB;
+            //    }
+            //}
 
             // 如果未配置则为 None
             if (setting.DatabaseType == DatabaseType.NONE)
@@ -101,9 +101,28 @@ namespace Midjourney.API
                 setting.DatabaseType = DatabaseType.LiteDB;
             }
 
+            // 初始化 Redis 验证是否可连接
+            if (setting.EnableRedis && !string.IsNullOrWhiteSpace(setting.RedisConnectionString))
+            {
+                try
+                {
+                    var csredis = new CSRedis.CSRedisClient(setting.RedisConnectionString);
+                    if (!csredis.Ping())
+                    {
+                        setting.EnableRedis = false;
+                        Log.Error("Redis 连接失败，已自动禁用 Redis 功能");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    setting.EnableRedis = false;
+                    Log.Error(ex, "Redis 连接异常，已自动禁用 Redis 功能");
+                }
+            }
+
             // 验证数据库是否可连接
             GlobalConfiguration.Setting = setting;
-            if (!DbHelper.Verify())
+            if (!DbHelper.VerifyConfigure())
             {
                 // 切换为本地数据库
                 setting.DatabaseType = DatabaseType.LiteDB;
