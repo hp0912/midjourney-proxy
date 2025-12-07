@@ -9,6 +9,25 @@ namespace Midjourney.Base
     /// </summary>
     public static class PrivateNetworkHelper
     {
+        /// <summary>
+        /// 获取阿里云 ECS 实例的私有 IP 地址
+        /// </summary>
+        /// <returns></returns>
+        public static async Task<string> GetAliyunPrivateIpAsync()
+        {
+            try
+            {
+                using var client = new HttpClient();
+                client.Timeout = TimeSpan.FromSeconds(2);
+                var privateIp = await client.GetStringAsync("http://100.100.100.200/latest/meta-data/private-ipv4");
+                return privateIp.Trim();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         #region 私有网络地址范围判断
 
         /// <summary>
@@ -163,45 +182,52 @@ namespace Midjourney.Base
         /// </summary>
         public static string GetPrimaryPrivateIP()
         {
-            // 方法0：通过环境变量获取（如果有设置）
-            string envIP = Environment.GetEnvironmentVariable("HOST_IP");
-            if (!string.IsNullOrEmpty(envIP) && IsRFC1918PrivateIP(IPAddress.Parse(envIP)))
+            try
             {
-                return envIP;
-            }
-
-            // 方法1：通过连接外部地址获取本机对外 IP（优先级最高）
-            var connectionIP = GetIPByConnection();
-            if (!string.IsNullOrEmpty(connectionIP) && IsRFC1918PrivateIP(IPAddress.Parse(connectionIP)))
-            {
-                return connectionIP;
-            }
-
-            // 方法2：从网络接口中选择最佳的私有 IP
-            var bestPrivateIP = GetBestPrivateIPFromInterfaces();
-            if (!string.IsNullOrEmpty(bestPrivateIP))
-            {
-                return bestPrivateIP;
-            }
-
-            // 方法3：通过 DNS 解析获取
-            var dnsIP = GetPrivateIPFromDNS();
-            if (!string.IsNullOrEmpty(dnsIP))
-            {
-                return dnsIP;
-            }
-
-            // 如果在 Docker 中且前面方法都失败，返回 Docker IP
-            if (IsRunningInDocker())
-            {
-                var dockerIP = GetDockerIP();
-                if (!string.IsNullOrEmpty(dockerIP))
+                // 方法0：通过环境变量获取（如果有设置）
+                string envIP = Environment.GetEnvironmentVariable("HOST_IP");
+                if (!string.IsNullOrEmpty(envIP) && IsRFC1918PrivateIP(IPAddress.Parse(envIP)))
                 {
-                    return dockerIP;
+                    return envIP;
                 }
-            }
 
-            return "127.0.0.1";
+                // 方法1：通过连接外部地址获取本机对外 IP（优先级最高）
+                var connectionIP = GetIPByConnection();
+                if (!string.IsNullOrEmpty(connectionIP) && IsRFC1918PrivateIP(IPAddress.Parse(connectionIP)))
+                {
+                    return connectionIP;
+                }
+
+                // 方法2：从网络接口中选择最佳的私有 IP
+                var bestPrivateIP = GetBestPrivateIPFromInterfaces();
+                if (!string.IsNullOrEmpty(bestPrivateIP))
+                {
+                    return bestPrivateIP;
+                }
+
+                // 方法3：通过 DNS 解析获取
+                var dnsIP = GetPrivateIPFromDNS();
+                if (!string.IsNullOrEmpty(dnsIP))
+                {
+                    return dnsIP;
+                }
+
+                // 如果在 Docker 中且前面方法都失败，返回 Docker IP
+                if (IsRunningInDocker())
+                {
+                    var dockerIP = GetDockerIP();
+                    if (!string.IsNullOrEmpty(dockerIP))
+                    {
+                        return dockerIP;
+                    }
+                }
+
+                return "127.0.0.1";
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         /// <summary>

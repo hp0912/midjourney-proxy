@@ -59,7 +59,7 @@ namespace Midjourney.Base.Services
         /// </summary>
         /// <param name="promptEn"></param>
         /// <exception cref="BannedPromptException"></exception>
-        void CheckBanned(string promptEn);
+        string CheckBanned(string promptEn);
 
         /// <summary>
         /// 提交 Imagine 任务。
@@ -67,7 +67,7 @@ namespace Midjourney.Base.Services
         /// <param name="task">任务对象。</param>
         /// <param name="dataUrls">图片数据列表。</param>
         /// <returns>提交结果。</returns>
-        SubmitResultVO SubmitImagine(TaskInfo task, List<DataUrl> dataUrls);
+        Task<SubmitResultVO> SubmitImagine(TaskInfo task, List<DataUrl> dataUrls);
 
         /// <summary>
         /// 提交 show 任务
@@ -114,14 +114,14 @@ namespace Midjourney.Base.Services
         /// <param name="task">任务对象。</param>
         /// <param name="dataUrl">图片数据。</param>
         /// <returns>提交结果。</returns>
-        SubmitResultVO SubmitDescribe(TaskInfo task, DataUrl dataUrl);
+        Task<SubmitResultVO> SubmitDescribe(TaskInfo task, DataUrl dataUrl);
 
         /// <summary>
         /// 上传一个较长的提示词，mj 可以返回一组简要的提示词
         /// </summary>
         /// <param name="task"></param>
         /// <returns></returns>
-        SubmitResultVO ShortenAsync(TaskInfo task);
+        Task<SubmitResultVO> ShortenAsync(TaskInfo task);
 
         /// <summary>
         /// 提交混合任务。
@@ -130,7 +130,7 @@ namespace Midjourney.Base.Services
         /// <param name="dataUrls">图片数据列表。</param>
         /// <param name="dimensions">混合维度。</param>
         /// <returns>提交结果。</returns>
-        SubmitResultVO SubmitBlend(TaskInfo task, List<DataUrl> dataUrls, BlendDimensions dimensions);
+        Task<SubmitResultVO> SubmitBlend(TaskInfo task, List<DataUrl> dataUrls, BlendDimensions dimensions);
 
         /// <summary>
         /// 执行动作
@@ -138,7 +138,7 @@ namespace Midjourney.Base.Services
         /// <param name="task"></param>
         /// <param name="submitAction"></param>
         /// <returns></returns>
-        SubmitResultVO SubmitAction(TaskInfo task, SubmitActionDTO submitAction);
+        Task<SubmitResultVO> SubmitAction(TaskInfo task, SubmitActionDTO submitAction);
 
         /// <summary>
         /// 提交编辑任务。
@@ -146,7 +146,7 @@ namespace Midjourney.Base.Services
         /// <param name="task"></param>
         /// <param name="dataUrl"></param>
         /// <returns></returns>
-        SubmitResultVO SubmitEdit(TaskInfo task, DataUrl dataUrl);
+        Task<SubmitResultVO> SubmitEdit(TaskInfo task, DataUrl dataUrl);
 
         /// <summary>
         /// 提交转绘任务。
@@ -154,7 +154,7 @@ namespace Midjourney.Base.Services
         /// <param name="task"></param>
         /// <param name="dataUrl"></param>
         /// <returns></returns>
-        SubmitResultVO SubmitRetexture(TaskInfo task, DataUrl dataUrl);
+        Task<SubmitResultVO> SubmitRetexture(TaskInfo task, DataUrl dataUrl);
 
         /// <summary>
         /// 提交视频任务
@@ -163,7 +163,7 @@ namespace Midjourney.Base.Services
         /// <param name="startUrl"></param>
         /// <param name="endUrl"></param>
         /// <returns></returns>
-        SubmitResultVO SubmitVideo(TaskInfo task, TaskInfo targetTask, DataUrl startUrl, DataUrl endUrl, SubmitVideoDTO videoDTO);
+        Task<SubmitResultVO> SubmitVideo(TaskInfo task, TaskInfo targetTask, DataUrl startUrl, DataUrl endUrl, SubmitVideoDTO videoDTO);
 
         /// <summary>
         /// 执行 Modal
@@ -171,7 +171,7 @@ namespace Midjourney.Base.Services
         /// <param name="task"></param>
         /// <param name="submitAction"></param>
         /// <returns></returns>
-        SubmitResultVO SubmitModal(TaskInfo task, SubmitModalDTO submitAction, DataUrl dataUrl = null);
+        Task<SubmitResultVO> SubmitModal(TaskInfo task, SubmitModalDTO submitAction, DataUrl dataUrl = null);
 
         /// <summary>
         /// 获取图片 seed

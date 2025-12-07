@@ -27,72 +27,111 @@ using System.Collections.Concurrent;
 namespace Midjourney.Base.Util
 {
     /// <summary>
-    /// 异步本地锁
+    /// 异步本地锁 - v20251203
     /// </summary>
     public static class AsyncLocalLock
     {
-        private static readonly ConcurrentDictionary<string, SemaphoreSlim> _lockObjs = new();
+        private static readonly ConcurrentDictionary<string, LockWrapper> _lockWrappers = new();
+        private static readonly object _cleanupLock = new();
+
+        /// <summary>
+        /// 锁包装器，包含信号量和引用计数
+        /// </summary>
+        private sealed class LockWrapper
+        {
+            public SemaphoreSlim Semaphore { get; } = new SemaphoreSlim(1, 1);
+
+            /// <summary>
+            /// 引用计数：包括正在等待和已获取锁的总数
+            /// </summary>
+            public int RefCount;
+        }
 
         /// <summary>
         /// 获取锁
         /// </summary>
-        /// <param name="key"></param>
-        /// <param name="span"></param>
-        /// <returns></returns>
-        private static async Task<bool> LockEnterAsync(string key, TimeSpan span)
+        public static async Task<bool> LockEnterAsync(string key, TimeSpan span)
         {
-            var semaphore = _lockObjs.GetOrAdd(key, new SemaphoreSlim(1, 1));
-            return await semaphore.WaitAsync(span);
-        }
+            ArgumentException.ThrowIfNullOrWhiteSpace(key);
 
-        ///// <summary>
-        ///// 获取锁
-        ///// </summary>
-        ///// <param name="key"></param>
-        ///// <param name="span"></param>
-        ///// <returns></returns>
-        //private static bool LockEnter(string key, TimeSpan span)
-        //{
-        //    var semaphore = _lockObjs.GetOrAdd(key, new SemaphoreSlim(1, 1));
-        //    return semaphore.Wait(span);
-        //}
+            LockWrapper wrapper;
+
+            // 增加引用计数
+            lock (_cleanupLock)
+            {
+                wrapper = _lockWrappers.GetOrAdd(key, _ => new LockWrapper());
+                wrapper.RefCount++;
+            }
+
+            bool acquired = false;
+            try
+            {
+                acquired = await wrapper.Semaphore.WaitAsync(span);
+                return acquired;
+            }
+            finally
+            {
+                if (!acquired)
+                {
+                    // 获取失败，回滚引用计数
+                    lock (_cleanupLock)
+                    {
+                        wrapper.RefCount--;
+                        if (wrapper.RefCount <= 0)
+                        {
+                            if (_lockWrappers.TryRemove(KeyValuePair.Create(key, wrapper)))
+                            {
+                                wrapper.Semaphore.Dispose();
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         /// <summary>
         /// 退出锁
         /// </summary>
-        /// <param name="key"></param>
-        private static void LockExit(string key)
+        public static void LockExit(string key)
         {
-            //if (_lockObjs.TryGetValue(key, out SemaphoreSlim semaphore) && semaphore != null)
-            //{
-            //    semaphore.Release();
-            //}
+            ArgumentException.ThrowIfNullOrWhiteSpace(key);
 
-            if (_lockObjs.TryGetValue(key, out SemaphoreSlim semaphore))
+            lock (_cleanupLock)
             {
-                _lockObjs.TryRemove(key, out _);
+                if (!_lockWrappers.TryGetValue(key, out var wrapper) || wrapper == null)
+                {
+                    return;
+                }
 
-                semaphore?.Release();
-                semaphore?.Dispose();
+                try
+                {
+                    wrapper.Semaphore.Release();
+                }
+                catch (SemaphoreFullException)
+                {
+                    // 重复释放，忽略
+                    return;
+                }
 
-                //if (semaphore.CurrentCount == 1) // 表示没有其他线程在等待锁
-                //{
-                //    _lockObjs.TryRemove(key, out _);
-
-                //    semaphore.Dispose(); // 释放 SemaphoreSlim 的资源
-                //}
+                wrapper.RefCount--;
+                if (wrapper.RefCount <= 0)
+                {
+                    if (_lockWrappers.TryRemove(KeyValuePair.Create(key, wrapper)))
+                    {
+                        wrapper.Semaphore.Dispose();
+                    }
+                }
             }
         }
 
         /// <summary>
         /// 等待并获取锁
         /// </summary>
-        /// <param name="resource"></param>
-        /// <param name="expirationTime">等待锁超时时间，如果超时没有获取到锁，返回 false</param>
-        /// <param name="action"></param>
-        /// <returns></returns>
         public static async Task<bool> TryLockAsync(string resource, TimeSpan expirationTime, Func<Task> action)
         {
+            ArgumentException.ThrowIfNullOrWhiteSpace(resource);
+            ArgumentNullException.ThrowIfNull(action);
+
             if (await LockEnterAsync(resource, expirationTime))
             {
                 try
@@ -108,42 +147,44 @@ namespace Midjourney.Base.Util
             return false;
         }
 
-        ///// <summary>
-        ///// 等待并获取锁 - 不要同步和异步混用
-        ///// </summary>
-        ///// <param name="resource"></param>
-        ///// <param name="expirationTime">等待锁超时时间，如果超时没有获取到锁，返回 false</param>
-        ///// <param name="action"></param>
-        ///// <returns></returns>
-        //public static bool TryLock(string resource, TimeSpan expirationTime, Action action)
-        //{
-        //    if (LockEnter(resource, expirationTime))
-        //    {
-        //        try
-        //        {
-        //            action?.Invoke();
-        //            return true;
-        //        }
-        //        finally
-        //        {
-        //            LockExit(resource);
-        //        }
-        //    }
-        //    return false;
-        //}
+        /// <summary>
+        /// 等待并获取锁（带返回值）
+        /// </summary>
+        public static async Task<(bool Success, T Result)> TryLockAsync<T>(string resource,
+            TimeSpan expirationTime, Func<Task<T>> func)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(resource);
+            ArgumentNullException.ThrowIfNull(func);
+
+            if (await LockEnterAsync(resource, expirationTime))
+            {
+                try
+                {
+                    return (true, await func());
+                }
+                finally
+                {
+                    LockExit(resource);
+                }
+            }
+            return (false, default);
+        }
 
         /// <summary>
-        /// 判断指定的锁是否可用
+        /// 获取当前活跃的锁数量（用于调试/监控）
         /// </summary>
-        /// <param name="key"></param>
-        /// <returns></returns>
-        public static bool IsLockAvailable(string key)
+        public static int ActiveLockCount => _lockWrappers.Count;
+
+        /// <summary>
+        /// 检查指定资源是否有活跃引用
+        /// </summary>
+        public static bool HasActiveReference(string resource)
         {
-            if (_lockObjs.TryGetValue(key, out SemaphoreSlim semaphore) && semaphore != null)
+            lock (_cleanupLock)
             {
-                return semaphore.CurrentCount > 0;
+                return _lockWrappers.TryGetValue(resource, out var wrapper)
+                       && wrapper.RefCount > 0;
             }
-            return true;
         }
     }
 }

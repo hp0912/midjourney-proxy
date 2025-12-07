@@ -43,6 +43,8 @@ namespace Midjourney.Base
                 return false;
             }
 
+            var setting = GlobalConfiguration.Setting;
+
             var now = new DateTimeOffset(DateTime.Now.Date).ToUnixTimeMilliseconds();
             var nowKey = DateTime.Now.Date.ToString("yyyyMMdd");
             var key = $"{nowKey}_{instanceId}";
@@ -52,16 +54,67 @@ namespace Midjourney.Base
                 return true;
             }
 
-            lock (_lock)
+            // 如果是 redis
+            if (setting.IsValidRedis)
             {
-                if (AccountTodaySuccessCounter.ContainsKey(key))
+                lock (_lock)
                 {
-                    return true;
+                    AccountTodayAllCounter.TryAdd(key, []);
+                    AccountTodaySuccessCounter.AddOrUpdate(key, [], (key, oldValue) => []);
+
+                    GenerationSpeedMode[] modes = [GenerationSpeedMode.FAST, GenerationSpeedMode.RELAX, GenerationSpeedMode.TURBO];
+                    foreach (var mode in modes)
+                    {
+                        // redis
+                        var accountTodayAllKey = $"counter_all_{DateTime.Now:yyyyMMdd}:{instanceId}_{mode}";
+                        var accountTodayAllCount = RedisHelper.Get<int?>(accountTodayAllKey);
+                        if (accountTodayAllCount == null)
+                        {
+                            continue;
+                        }
+
+                        AccountTodayAllCounter[key].TryAdd(mode, 0);
+                        AccountTodayAllCounter[key][mode] = accountTodayAllCount.Value;
+
+                        foreach (TaskAction action in Enum.GetValues(typeof(TaskAction)))
+                        {
+                            var accountSuccessKey = $"counter_success_{DateTime.Now:yyyyMMdd}:{instanceId}_{mode}_{action}";
+                            var accountSuccessCount = RedisHelper.Get<int?>(accountSuccessKey);
+                            if (accountSuccessCount != null)
+                            {
+                                if (!AccountTodaySuccessCounter[key].ContainsKey(mode))
+                                {
+                                    AccountTodaySuccessCounter[key].TryAdd(mode, []);
+                                }
+                                if (!AccountTodaySuccessCounter[key][mode].ContainsKey(action))
+                                {
+                                    AccountTodaySuccessCounter[key][mode].TryAdd(action, 0);
+                                }
+                                AccountTodaySuccessCounter[key][mode][action] = accountSuccessCount.Value;
+                            }
+                        }
+                    }
                 }
 
+                // 昨天的 key 移除
+                var yesterdayKey = $"{DateTime.Now.Date.AddDays(-1):yyyyMMdd}_{instanceId}";
+                if (AccountTodaySuccessCounter.ContainsKey(yesterdayKey))
+                {
+                    AccountTodaySuccessCounter.TryRemove(yesterdayKey, out _);
+                }
+
+                if (AccountTodayAllCounter.ContainsKey(yesterdayKey))
+                {
+                    AccountTodayAllCounter.TryRemove(yesterdayKey, out _);
+                }
+
+                return true;
+            }
+
+            lock (_lock)
+            {
                 AccountTodaySuccessCounter.AddOrUpdate(key, [], (key, oldValue) => []);
 
-                var setting = GlobalConfiguration.Setting;
                 if (setting.DatabaseType == DatabaseType.MongoDB)
                 {
                     var list = MongoHelper.GetCollection<TaskInfo>().AsQueryable()
@@ -195,18 +248,18 @@ namespace Midjourney.Base
                         AccountTodayAllCounter.AddOrUpdate(key, allCounts, (k, v) => allCounts);
                     }
                 }
-            }
 
-            // 昨天的 key 移除
-            var yesterdayKey = $"{DateTime.Now.Date.AddDays(-1):yyyyMMdd}_{instanceId}";
-            if (AccountTodaySuccessCounter.ContainsKey(yesterdayKey))
-            {
-                AccountTodaySuccessCounter.TryRemove(yesterdayKey, out _);
-            }
+                // 昨天的 key 移除
+                var yesterdayKey = $"{DateTime.Now.Date.AddDays(-1):yyyyMMdd}_{instanceId}";
+                if (AccountTodaySuccessCounter.ContainsKey(yesterdayKey))
+                {
+                    AccountTodaySuccessCounter.TryRemove(yesterdayKey, out _);
+                }
 
-            if (AccountTodayAllCounter.ContainsKey(yesterdayKey))
-            {
-                AccountTodayAllCounter.TryRemove(yesterdayKey, out _);
+                if (AccountTodayAllCounter.ContainsKey(yesterdayKey))
+                {
+                    AccountTodayAllCounter.TryRemove(yesterdayKey, out _);
+                }
             }
 
             return true;
@@ -222,6 +275,7 @@ namespace Midjourney.Base
             {
                 return false;
             }
+            var setting = GlobalConfiguration.Setting;
 
             var now = new DateTimeOffset(DateTime.Now.Date).ToUnixTimeMilliseconds();
             var nowKey = DateTime.Now.Date.ToString("yyyyMMdd");
@@ -232,16 +286,54 @@ namespace Midjourney.Base
                 return true;
             }
 
-            lock (_lock)
+            // 如果是 redis
+            if (setting.IsValidRedis)
             {
-                if (UserTodadSuccessCounter.ContainsKey(key))
+                lock (_lock)
                 {
-                    return true;
+                    UserTodadSuccessCounter.AddOrUpdate(key, [], (key, oldValue) => []);
+
+                    GenerationSpeedMode[] modes = [GenerationSpeedMode.FAST, GenerationSpeedMode.RELAX, GenerationSpeedMode.TURBO];
+                    foreach (var mode in modes)
+                    {
+                        foreach (TaskAction action in Enum.GetValues(typeof(TaskAction)))
+                        {
+                            var userTodaySuccessKey = $"counter_user_success_{DateTime.Now.Date:yyyyMMdd}:{userId}_{mode}_{action}";
+                            var userTodaySuccessCount = RedisHelper.Get<int?>(userTodaySuccessKey);
+                            if (userTodaySuccessCount != null)
+                            {
+                                if (!UserTodadSuccessCounter.ContainsKey(key))
+                                {
+                                    UserTodadSuccessCounter.TryAdd(key, []);
+                                }
+                                if (!UserTodadSuccessCounter[key].ContainsKey(mode))
+                                {
+                                    UserTodadSuccessCounter[key].TryAdd(mode, []);
+                                }
+                                if (!UserTodadSuccessCounter[key][mode].ContainsKey(action))
+                                {
+                                    UserTodadSuccessCounter[key][mode].TryAdd(action, 0);
+                                }
+                                UserTodadSuccessCounter[key][mode][action] = userTodaySuccessCount.Value;
+                            }
+                        }
+                    }
                 }
 
+                // 昨天的 key 移除
+                var yesterdayKey = $"{DateTime.Now.Date.AddDays(-1):yyyyMMdd}_{userId}";
+                if (UserTodadSuccessCounter.ContainsKey(yesterdayKey))
+                {
+                    UserTodadSuccessCounter.TryRemove(yesterdayKey, out _);
+                }
+
+                return true;
+            }
+
+            lock (_lock)
+            {
                 UserTodadSuccessCounter.AddOrUpdate(key, [], (key, oldValue) => []);
 
-                var setting = GlobalConfiguration.Setting;
                 if (setting.DatabaseType == DatabaseType.MongoDB)
                 {
                     var list = MongoHelper.GetCollection<TaskInfo>().AsQueryable()
@@ -333,13 +425,13 @@ namespace Midjourney.Base
                         }
                     }
                 }
-            }
 
-            // 昨天的 key 移除
-            var yesterdayKey = $"{DateTime.Now.Date.AddDays(-1):yyyyMMdd}_{userId}";
-            if (UserTodadSuccessCounter.ContainsKey(yesterdayKey))
-            {
-                UserTodadSuccessCounter.TryRemove(yesterdayKey, out _);
+                // 昨天的 key 移除
+                var yesterdayKey = $"{DateTime.Now.Date.AddDays(-1):yyyyMMdd}_{userId}";
+                if (UserTodadSuccessCounter.ContainsKey(yesterdayKey))
+                {
+                    UserTodadSuccessCounter.TryRemove(yesterdayKey, out _);
+                }
             }
 
             return true;
@@ -349,23 +441,147 @@ namespace Midjourney.Base
         /// 任务完成时，计数器 +1
         /// </summary>
         /// <param name="info"></param>
-        public static void Complete(TaskInfo info, bool success)
+        public static void Complete(TaskInfo info, bool success, bool isIncr = true)
         {
             if (info == null || info.Action == null)
             {
                 return;
             }
 
+            var mode = info.Mode ?? GenerationSpeedMode.FAST;
+            var setting = GlobalConfiguration.Setting;
+
+            // 如果是 redis
+            if (setting.IsValidRedis)
+            {
+                lock (_lock)
+                {
+                    // 统计账号
+                    if (true)
+                    {
+                        // redis
+                        var accountTodayAllKey = $"counter_all_{DateTime.Now:yyyyMMdd}:{info.InstanceId}_{mode}";
+                        var accountTodayAllCount = 0;
+
+                        if (isIncr)
+                        {
+                            accountTodayAllCount = (int)RedisHelper.IncrBy(accountTodayAllKey, 1);
+                            RedisHelper.Expire(accountTodayAllKey, TimeSpan.FromDays(2));
+                        }
+                        else
+                        {
+                            accountTodayAllCount = RedisHelper.Get<int?>(accountTodayAllKey) ?? 0;
+                        }
+
+                        // 统计所有
+                        var key = $"{DateTime.Now:yyyyMMdd}_{info.InstanceId}";
+                        if (!AccountTodayAllCounter.ContainsKey(key))
+                        {
+                            AccountTodayAllCounter.TryAdd(key, []);
+                        }
+                        if (!AccountTodayAllCounter[key].ContainsKey(mode))
+                        {
+                            AccountTodayAllCounter[key].TryAdd(mode, 0);
+                        }
+                        AccountTodayAllCounter[key][mode] = accountTodayAllCount;
+
+                        // 统计成功
+                        if (success)
+                        {
+                            // redis
+                            var accountSuccessKey = $"counter_success_{DateTime.Now:yyyyMMdd}:{info.InstanceId}_{mode}_{info.Action}";
+
+                            var accountSuccessCount = 0;
+                            if (isIncr)
+                            {
+                                accountSuccessCount = (int)RedisHelper.IncrBy(accountSuccessKey, 1);
+                                RedisHelper.Expire(accountSuccessKey, TimeSpan.FromDays(2));
+                            }
+                            else
+                            {
+                                accountSuccessCount = RedisHelper.Get<int?>(accountSuccessKey) ?? 0;
+                            }
+
+                            if (!AccountTodaySuccessCounter.ContainsKey(key))
+                            {
+                                AccountTodaySuccessCounter.TryAdd(key, []);
+                            }
+                            if (!AccountTodaySuccessCounter[key].ContainsKey(mode))
+                            {
+                                AccountTodaySuccessCounter[key].TryAdd(mode, []);
+                            }
+                            if (!AccountTodaySuccessCounter[key][mode].ContainsKey(info.Action.Value))
+                            {
+                                AccountTodaySuccessCounter[key][mode].TryAdd(info.Action.Value, 0);
+                            }
+
+                            AccountTodaySuccessCounter[key][mode][info.Action.Value] = accountSuccessCount;
+                        }
+                    }
+
+                    // 统计个人
+                    if (true)
+                    {
+                        // 统计成功
+                        if (success)
+                        {
+                            // 个人成功统计
+                            var userTodaySuccessKey = $"counter_user_success_{DateTime.Now.Date:yyyyMMdd}:{info.UserId}_{mode}_{info.Action.Value}";
+                            var userTodaySuccessCount = 0;
+
+                            if (isIncr)
+                            {
+                                userTodaySuccessCount = (int)RedisHelper.IncrBy(userTodaySuccessKey, 1);
+                                RedisHelper.Expire(userTodaySuccessKey, TimeSpan.FromDays(2));
+                            }
+                            else
+                            {
+                                userTodaySuccessCount = RedisHelper.Get<int?>(userTodaySuccessKey) ?? 0;
+                            }
+
+                            var key = $"{DateTime.Now.Date:yyyyMMdd}_{info.UserId}";
+                            if (!UserTodadSuccessCounter.ContainsKey(key))
+                            {
+                                UserTodadSuccessCounter.TryAdd(key, []);
+                            }
+
+                            if (!UserTodadSuccessCounter[key].ContainsKey(mode))
+                            {
+                                UserTodadSuccessCounter[key].TryAdd(mode, []);
+                            }
+
+                            if (!UserTodadSuccessCounter[key][mode].ContainsKey(info.Action.Value))
+                            {
+                                UserTodadSuccessCounter[key][mode].TryAdd(info.Action.Value, 0);
+                            }
+
+                            UserTodadSuccessCounter[key][mode][info.Action.Value] = userTodaySuccessCount;
+                        }
+                    }
+                }
+
+                // 增量时才发送通知
+                if (isIncr)
+                {
+                    var notification = new RedisNotification
+                    {
+                        Type = ENotificationType.CompleteTaskInfo,
+                        IsSuccess = success,
+                        TaskInfo = info
+                    };
+                    RedisHelper.Publish(RedisHelper.Prefix + Constants.REDIS_NOTIFY_CHANNEL, notification.ToJson());
+                }
+
+                return;
+            }
+
             lock (_lock)
             {
-                var mode = info.Mode ?? GenerationSpeedMode.FAST;
-
                 // 统计账号
                 if (InitAccountTodayCounter(info.InstanceId))
                 {
-                    var key = $"{DateTime.Now.Date:yyyyMMdd}_{info.InstanceId}";
-
                     // 统计所有
+                    var key = $"{DateTime.Now.Date:yyyyMMdd}_{info.InstanceId}";
                     if (!AccountTodayAllCounter.ContainsKey(key))
                     {
                         AccountTodayAllCounter.TryAdd(key, []);
@@ -394,7 +610,6 @@ namespace Midjourney.Base
                             AccountTodaySuccessCounter[key][mode].TryAdd(info.Action.Value, 0);
                         }
 
-                        var count = AccountTodaySuccessCounter[key][mode][info.Action.Value];
                         AccountTodaySuccessCounter[key][mode][info.Action.Value] += 1;
                     }
                 }

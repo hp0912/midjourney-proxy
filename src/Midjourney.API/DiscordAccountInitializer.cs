@@ -153,7 +153,6 @@ namespace Midjourney.API
                                         }
                                     }
                                 }
-
                             }
                             catch (Exception ex)
                             {
@@ -196,13 +195,12 @@ namespace Midjourney.API
                     // 初始化数据库索引
                     DbHelper.Instance.IndexInit();
 
+                    // 迁移 account user domain banded
                     // 是否开启 LiteDB 自动迁移
-                    if (setting.DatabaseType != DatabaseType.NONE && setting.DatabaseType != DatabaseType.LiteDB && setting.IsAutoMigrate)
+                    if (setting.DatabaseType != DatabaseType.LiteDB && setting.DatabaseType != DatabaseType.MongoDB && setting.IsAutoMigrate)
                     {
-                        // 迁移 account user domain banded
                         try
                         {
-                            // 如果 liteAccountIds 的数据在 mongoAccountIds 不存在，则迁移到 mongodb
                             // account 迁移
                             var liteAccountIds = LiteDBHelper.AccountStore.GetAllIds();
                             var accountStore = DbHelper.Instance.AccountStore;
@@ -283,14 +281,213 @@ namespace Midjourney.API
                         // 迁移 task
                         try
                         {
-                            _ = Task.Run(() =>
+                            _ = Task.Run(async () =>
                             {
-                                TaskInfoAutoMigrate();
+                                try
+                                {
+                                    await AdaptiveLock.ExecuteWithLock("TaskInfoAutoMigrate", TimeSpan.FromSeconds(10), () =>
+                                    {
+                                        // 判断最后一条是否存在
+                                        var success = 0;
+                                        var last = LiteDBHelper.TaskStore.GetCollection().Query().OrderByDescending(c => c.SubmitTime).FirstOrDefault();
+                                        if (last != null)
+                                        {
+                                            var taskStore = DbHelper.Instance.TaskStore;
+
+                                            var lastModel = taskStore.Single(c => c.Id == last.Id);
+                                            if (lastModel == null)
+                                            {
+                                                // 迁移数据
+                                                var taskIds = LiteDBHelper.TaskStore.GetCollection().Query().Select(c => c.Id).ToList();
+                                                foreach (var tid in taskIds)
+                                                {
+                                                    try
+                                                    {
+                                                        var info = LiteDBHelper.TaskStore.Get(tid);
+                                                        if (info != null)
+                                                        {
+                                                            // 判断是否存在
+                                                            var exist = taskStore.Any(c => c.Id == info.Id);
+                                                            if (!exist)
+                                                            {
+                                                                taskStore.Add(info);
+                                                                success++;
+                                                            }
+                                                        }
+                                                    }
+                                                    catch (Exception ex)
+                                                    {
+                                                        _logger.Error(ex, "LiteDB 自动迁移绘图任务数异常 TaskId: {@0}", tid);
+                                                    }
+                                                }
+
+                                                _logger.Information("LiteDB 自动迁移绘图任务数据 success: {@0}", success);
+                                            }
+                                        }
+                                    });
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.Error(ex, "LiteDB 自动迁移绘图任务数据 error");
+                                }
                             });
                         }
                         catch (Exception ex)
                         {
                             _logger.Error(ex, "LiteDB 数据迁移任务信息异常");
+                        }
+                    }
+
+                    // 迁移 account user domain banded
+                    // 是否开启 MongoDB 自动迁移
+                    if (setting.DatabaseType != DatabaseType.LiteDB && setting.DatabaseType != DatabaseType.MongoDB && setting.IsAutoMigrateMongo)
+                    {
+                        try
+                        {
+                            // 创建 mongodb 实例
+                            if (!string.IsNullOrWhiteSpace(setting.MongoDefaultConnectionString) && !string.IsNullOrWhiteSpace(setting.MongoDefaultDatabase))
+                            {
+                                var mongo = MongoDbFactory.Create(setting.MongoDefaultConnectionString, setting.MongoDefaultDatabase);
+                                if (mongo.VerifyConnection())
+                                {
+                                    // account 迁移
+                                    var sourceAccountIds = mongo.GetCollection<DiscordAccount>().Find(x => true).Project(c => c.Id).ToList();
+                                    var accountStore = DbHelper.Instance.AccountStore;
+                                    var targetAccountIds = accountStore.GetAllIds();
+                                    var accountIds = sourceAccountIds.Except(targetAccountIds).ToList();
+                                    if (accountIds.Count > 0)
+                                    {
+                                        var sourceAccounts = mongo.GetCollection<DiscordAccount>().Find(x => true).ToList();
+                                        foreach (var id in accountIds)
+                                        {
+                                            var model = sourceAccounts.FirstOrDefault(c => c.Id == id);
+                                            if (model != null)
+                                            {
+                                                accountStore.Add(model);
+                                            }
+                                        }
+                                    }
+
+                                    // user 迁移
+                                    var sourceUserIds = mongo.GetCollection<User>().Find(x => true).Project(c => c.Id).ToList();
+                                    var userStore = DbHelper.Instance.UserStore;
+                                    var targetUserIds = userStore.GetAllIds();
+                                    var userIds = sourceUserIds.Except(targetUserIds).ToList();
+                                    if (userIds.Count > 0)
+                                    {
+                                        var sourceUsers = mongo.GetCollection<User>().Find(x => true).ToList();
+                                        foreach (var id in userIds)
+                                        {
+                                            var model = sourceUsers.FirstOrDefault(c => c.Id == id);
+                                            if (model != null)
+                                            {
+                                                userStore.Add(model);
+                                            }
+                                        }
+                                    }
+
+                                    // domain 迁移
+                                    var sourceDomainIds = mongo.GetCollection<DomainTag>().Find(x => true).Project(c => c.Id).ToList();
+                                    var domainStore = DbHelper.Instance.DomainStore;
+                                    var targetDomainIds = domainStore.GetAllIds();
+                                    var domainIds = sourceDomainIds.Except(targetDomainIds).ToList();
+                                    if (domainIds.Count > 0)
+                                    {
+                                        var sourceDomains = mongo.GetCollection<DomainTag>().Find(x => true).ToList();
+                                        foreach (var id in domainIds)
+                                        {
+                                            var model = sourceDomains.FirstOrDefault(c => c.Id == id);
+                                            if (model != null)
+                                            {
+                                                domainStore.Add(model);
+                                            }
+                                        }
+                                    }
+
+                                    // banded 迁移
+                                    var sourceBannedIds = mongo.GetCollection<BannedWord>().Find(x => true).Project(c => c.Id).ToList();
+                                    var bannedStore = DbHelper.Instance.BannedWordStore;
+                                    var targetBannedIds = bannedStore.GetAllIds();
+                                    var bannedIds = sourceBannedIds.Except(targetBannedIds).ToList();
+                                    if (bannedIds.Count > 0)
+                                    {
+                                        var sourceBanneds = mongo.GetCollection<BannedWord>().Find(x => true).ToList();
+                                        foreach (var id in bannedIds)
+                                        {
+                                            var model = sourceBanneds.FirstOrDefault(c => c.Id == id);
+                                            if (model != null)
+                                            {
+                                                bannedStore.Add(model);
+                                            }
+                                        }
+                                    }
+
+                                    // 迁移 task
+                                    try
+                                    {
+                                        _ = Task.Run(async () =>
+                                        {
+                                            try
+                                            {
+                                                await AdaptiveLock.ExecuteWithLock("TaskInfoAutoMigrate", TimeSpan.FromSeconds(10), () =>
+                                                {
+                                                    // 判断最后一条是否存在
+                                                    var success = 0;
+                                                    var error = 0;
+                                                    var last = mongo.GetCollection<TaskInfo>().Find(x => true).SortByDescending(c => c.SubmitTime).FirstOrDefault();
+                                                    if (last != null)
+                                                    {
+                                                        var taskStore = DbHelper.Instance.TaskStore;
+                                                        var lastModel = taskStore.Single(c => c.Id == last.Id);
+                                                        if (lastModel == null)
+                                                        {
+                                                            // 迁移数据
+                                                            var taskIds = mongo.GetCollection<TaskInfo>().Find(x => true).Project(c => c.Id).ToList();
+                                                            foreach (var tid in taskIds)
+                                                            {
+                                                                try
+                                                                {
+                                                                    var info = mongo.GetCollection<TaskInfo>().Find(x => x.Id == tid).FirstOrDefault();
+                                                                    if (info != null)
+                                                                    {
+                                                                        // 判断是否存在
+                                                                        var exist = taskStore.Any(c => c.Id == info.Id);
+                                                                        if (!exist)
+                                                                        {
+                                                                            taskStore.Add(info);
+                                                                            success++;
+                                                                        }
+                                                                    }
+                                                                }
+                                                                catch (Exception ex)
+                                                                {
+                                                                    error++;
+
+                                                                    _logger.Error(ex, "MongoDB 自动迁移绘图任务数异常 TaskId: {@0}", tid);
+                                                                }
+                                                            }
+
+                                                            _logger.Information("MongoDB 自动迁移绘图任务数据 success: {@0}, error: {@1}", success, error);
+                                                        }
+                                                    }
+                                                });
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                _logger.Error(ex, "MongoDB 自动迁移绘图任务数据 error");
+                                            }
+                                        });
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.Error(ex, "MongoDB 数据迁移任务信息异常");
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.Error(ex, "MongoDB 数据迁移基本信息异常");
                         }
                     }
 
@@ -407,6 +604,25 @@ namespace Midjourney.API
                             _logger.Error(ex, "注册 Consul 服务注册失败");
                         }
                     }
+
+                    // 订阅 redis 消息
+                    if (setting.IsValidRedis)
+                    {
+                        RedisHelper.Subscribe((RedisHelper.Prefix + Constants.REDIS_NOTIFY_CHANNEL, async msg =>
+                        {
+                            try
+                            {
+                                var notification = msg.Body.ToObject<RedisNotification>();
+                                await OnRedisReceived(notification);
+                            }
+                            catch (Exception ex)
+                            {
+                                // 记录日志
+                                Log.Error(ex, $"处理缓存清除通知时发生错误");
+                            }
+                        }
+                        ));
+                    }
                 });
 
                 // 确保在应用程序停止时注销服务
@@ -428,53 +644,6 @@ namespace Midjourney.API
             catch (Exception ex)
             {
                 _logger.Error(ex, "启动异常");
-            }
-        }
-
-        /// <summary>
-        /// 自动迁移绘图任务数据
-        /// </summary>
-        public void TaskInfoAutoMigrate()
-        {
-            try
-            {
-                LocalLock.TryLock("TaskInfoAutoMigrate", TimeSpan.FromSeconds(10), () =>
-                {
-                    // 判断最后一条是否存在
-                    var success = 0;
-                    var last = LiteDBHelper.TaskStore.GetCollection().Query().OrderByDescending(c => c.SubmitTime).FirstOrDefault();
-                    if (last != null)
-                    {
-                        var taskStore = DbHelper.Instance.TaskStore;
-
-                        var lastModel = taskStore.Single(c => c.Id == last.Id);
-                        if (lastModel == null)
-                        {
-                            // 迁移数据
-                            var taskIds = LiteDBHelper.TaskStore.GetCollection().Query().Select(c => c.Id).ToList();
-                            foreach (var tid in taskIds)
-                            {
-                                var info = LiteDBHelper.TaskStore.Get(tid);
-                                if (info != null)
-                                {
-                                    // 判断是否存在
-                                    var exist = taskStore.Any(c => c.Id == info.Id);
-                                    if (!exist)
-                                    {
-                                        taskStore.Add(info);
-                                        success++;
-                                    }
-                                }
-                            }
-
-                            _logger.Information("自动迁移绘图任务数据 success: {@0}", success);
-                        }
-                    }
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.Error(ex, "自动迁移绘图任务数据 error");
             }
         }
 
@@ -681,7 +850,7 @@ namespace Midjourney.API
                         _isUpgrading = false;
                     }
 
-                    if (!_isUpgrading && (_upgradeTime == null || (DateTime.Now - _upgradeTime.Value).TotalHours > 1))
+                    if (!_isUpgrading && (_upgradeTime == null || (DateTime.Now - _upgradeTime.Value).TotalHours > 6))
                     {
                         _upgradeTime = DateTime.Now;
                         _isUpgrading = true;
@@ -817,7 +986,7 @@ namespace Midjourney.API
                     {
                         DrawCounter.InitAccountTodayCounter(account.ChannelId);
 
-                        await StartCheckAccount(account, false);
+                        await StartAccount(account);
                     }
                     catch (Exception ex)
                     {
@@ -840,7 +1009,7 @@ namespace Midjourney.API
 
             if (!isLock)
             {
-                _logger.Warning("初始化所有账号中，请稍后重试...");
+                _logger.Debug("初始化所有账号中，请稍后重试...");
             }
 
             await Task.CompletedTask;
@@ -849,216 +1018,231 @@ namespace Midjourney.API
         /// <summary>
         /// 检查并启动连接
         /// </summary>
-        public async Task StartCheckAccount(DiscordAccount account, bool isValidateLock = true)
+        public async Task StartAccount(DiscordAccount account)
         {
             if (account == null || account.Enable != true)
             {
                 return;
             }
 
-            var isLock = await AsyncLocalLock.TryLockAsync($"initialize:{account.Id}", TimeSpan.FromSeconds(5), async () =>
+            // 自适应锁
+            await using var lockHandle = await AdaptiveLock.LockAsync(account.InitializationLockKey, 10);
+            if (!lockHandle.IsAcquired)
             {
-                var setting = GlobalConfiguration.Setting;
+                return;
+            }
 
-                var sw = new Stopwatch();
-                var swAll = new Stopwatch();
+            var setting = GlobalConfiguration.Setting;
 
-                swAll.Start();
-                sw.Start();
+            var swAll = new Stopwatch();
+            swAll.Start();
 
-                var info = new StringBuilder();
-                info.AppendLine($"{account.Id}初始化中...");
+            var sw = new Stopwatch();
+            sw.Start();
 
-                var db = DbHelper.Instance.AccountStore;
-                DiscordInstance disInstance = null;
+            var info = new StringBuilder();
 
-                try
+            //info.AppendLine($"{account.ChannelId} 开始检查");
+
+            var db = DbHelper.Instance.AccountStore;
+            DiscordInstance disInstance = null;
+
+            try
+            {
+                // 获取获取值
+                account = db.Get(account.Id);
+                if (account == null)
                 {
-                    // 获取获取值
-                    account = db.Get(account.Id)!;
+                    return;
+                }
 
-                    // 如果账号处于登录中
-                    if (account.IsAutoLogining && !account.IsYouChuan && !account.IsOfficial)
+                // 如果账号处于登录中
+                if (account.IsAutoLogining && !account.IsYouChuan && !account.IsOfficial)
+                {
+                    // 如果超过 10 分钟
+                    if (account.LoginStart.HasValue && account.LoginStart.Value.AddMinutes(10) < DateTime.Now)
                     {
-                        // 如果超过 10 分钟
-                        if (account.LoginStart.HasValue && account.LoginStart.Value.AddMinutes(10) < DateTime.Now)
-                        {
-                            account.IsAutoLogining = false;
-                            account.LoginMessage = "登录超时";
-
-                            db.Update("IsAutoLogining,LoginMessage", account);
-                        }
+                        account.IsAutoLogining = false;
+                        account.LoginMessage = "登录超时";
+                        db.Update("IsAutoLogining,LoginMessage", account);
                     }
+                }
 
-                    if (account.Enable != true)
-                    {
-                        return;
-                    }
+                if (account.Enable != true)
+                {
+                    return;
+                }
 
-                    disInstance = _discordLoadBalancer.GetDiscordInstance(account.ChannelId);
+                disInstance = _discordLoadBalancer.GetDiscordInstance(account.ChannelId);
 
-                    // 判断是否在工作时间内
-                    var now = new DateTimeOffset(DateTime.Now.Date).ToUnixTimeMilliseconds();
-                    //var dayCount = (int)DbHelper.Instance.TaskStore.Count(c => c.InstanceId == account.ChannelId && c.SubmitTime >= now);
+                // 判断是否在工作时间内
+                var now = new DateTimeOffset(DateTime.Now.Date).ToUnixTimeMilliseconds();
 
+                //sw.Stop();
+                //info.AppendLine($"{account.ChannelId} 初始化中... 获取任务数耗时: {sw.ElapsedMilliseconds}ms");
+                //sw.Restart();
+
+                // 随机延期token
+                if (setting.EnableAutoExtendToken && !account.IsYouChuan && !account.IsOfficial)
+                {
+                    await RandomSyncToken(account);
                     sw.Stop();
-                    info.AppendLine($"{account.Id}初始化中... 获取任务数耗时: {sw.ElapsedMilliseconds}ms");
+                    info.AppendLine($"{account.ChannelId}初始化中... 随机延期token耗时: {sw.ElapsedMilliseconds}ms");
                     sw.Restart();
+                }
 
-                    // 随机延期token
-                    if (setting.EnableAutoExtendToken && !account.IsYouChuan && !account.IsOfficial)
+                // 只要在工作时间内，就创建实例
+                if (DateTime.Now.IsInWorkTime(account.WorkTime))
+                {
+                    if (disInstance == null)
                     {
-                        await RandomSyncToken(account);
-                        sw.Stop();
-                        info.AppendLine($"{account.Id}初始化中... 随机延期token耗时: {sw.ElapsedMilliseconds}ms");
-                        sw.Restart();
-                    }
-
-                    // 只要在工作时间内，就创建实例
-                    if (DateTime.Now.IsInWorkTime(account.WorkTime))
-                    {
-                        if (disInstance == null)
+                        // 初始化子频道
+                        if (!account.IsYouChuan && !account.IsOfficial)
                         {
-                            // 初始化子频道
                             account.InitSubChannels();
+                        }
 
-                            // 快速时长校验
-                            // 如果 fastTime <= 0.1，则标记为快速用完
-                            var fastTime = account.FastTimeRemaining?.ToString()?.Split('/')?.FirstOrDefault()?.Trim();
-                            if (!string.IsNullOrWhiteSpace(fastTime) && double.TryParse(fastTime, out var ftime) && ftime <= 0.1)
+                        // 快速时长校验
+                        // 如果 fastTime <= 0.1，则标记为快速用完
+                        var fastTime = account.FastTimeRemaining?.ToString()?.Split('/')?.FirstOrDefault()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(fastTime) && double.TryParse(fastTime, out var ftime) && ftime <= 0.2)
+                        {
+                            account.FastExhausted = true;
+                        }
+                        else
+                        {
+                            account.FastExhausted = false;
+                        }
+
+                        // 自动设置慢速，如果快速用完
+                        if (account.FastExhausted == true && account.EnableAutoSetRelax == true)
+                        {
+                            account.AllowModes = new List<GenerationSpeedMode>() { GenerationSpeedMode.RELAX };
+                            if (account.CoreSize > 3)
                             {
-                                account.FastExhausted = true;
+                                account.CoreSize = 3;
                             }
-                            else
+                        }
+
+                        // 启用自动获取私信 ID
+                        if (setting.EnableAutoGetPrivateId && !account.IsYouChuan && !account.IsOfficial)
+                        {
+                            try
                             {
-                                account.FastExhausted = false;
+                                Thread.Sleep(500);
+                                var id = await _discordAccountHelper.GetBotPrivateId(account, EBotType.MID_JOURNEY);
+                                if (!string.IsNullOrWhiteSpace(id))
+                                {
+                                    account.PrivateChannelId = id;
+                                }
                             }
-
-                            // 自动设置慢速，如果快速用完
-                            if (account.FastExhausted == true && account.EnableAutoSetRelax == true)
+                            catch (Exception ex)
                             {
-                                account.AllowModes = new List<GenerationSpeedMode>() { GenerationSpeedMode.RELAX };
+                                _logger.Error(ex, "获取 MJ 私聊频道 ID 异常 {@0}", account.ChannelId);
 
-                                if (account.CoreSize > 3)
-                                {
-                                    account.CoreSize = 3;
-                                }
+                                info.AppendLine($"{account.Id}初始化中... 获取 MJ 私聊频道 ID 异常");
                             }
-
-                            // 启用自动获取私信 ID
-                            if (setting.EnableAutoGetPrivateId && !account.IsYouChuan && !account.IsOfficial)
-                            {
-                                try
-                                {
-                                    Thread.Sleep(500);
-                                    var id = await _discordAccountHelper.GetBotPrivateId(account, EBotType.MID_JOURNEY);
-                                    if (!string.IsNullOrWhiteSpace(id))
-                                    {
-                                        account.PrivateChannelId = id;
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.Error(ex, "获取 MJ 私聊频道 ID 异常 {@0}", account.ChannelId);
-
-                                    info.AppendLine($"{account.Id}初始化中... 获取 MJ 私聊频道 ID 异常");
-                                }
-
-                                sw.Stop();
-                                info.AppendLine($"{account.Id}初始化中... 获取 MJ 私聊频道 ID 耗时: {sw.ElapsedMilliseconds}ms");
-                                sw.Restart();
-
-                                try
-                                {
-                                    Thread.Sleep(500);
-                                    var id = await _discordAccountHelper.GetBotPrivateId(account, EBotType.NIJI_JOURNEY);
-                                    if (!string.IsNullOrWhiteSpace(id))
-                                    {
-                                        account.NijiBotChannelId = id;
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.Error(ex, "获取 NIJI 私聊频道 ID 异常 {@0}", account.ChannelId);
-
-                                    info.AppendLine($"{account.Id}初始化中... 获取 NIJI 私聊频道 ID 异常");
-                                }
-
-                                sw.Stop();
-                                info.AppendLine($"{account.Id}初始化中... 获取 NIJI 私聊频道 ID 耗时: {sw.ElapsedMilliseconds}ms");
-                                sw.Restart();
-                            }
-
-                            //account.DayDrawCount = dayCount;
-                            db.Update("NijiBotChannelId,PrivateChannelId,AllowModes,SubChannels,SubChannelValues,FastExhausted", account);
-
-                            // 清除缓存
-                            ClearAccountCache(account.Id);
-
-                            // 启用自动验证账号功能
-                            // 连接前先判断账号是否正常
-                            if (setting.EnableAutoVerifyAccount && !account.IsYouChuan && !account.IsOfficial)
-                            {
-                                var success = await _discordAccountHelper.ValidateAccount(account);
-                                if (!success)
-                                {
-                                    throw new Exception("账号不可用");
-                                }
-
-                                sw.Stop();
-                                info.AppendLine($"{account.Id}初始化中... 验证账号耗时: {sw.ElapsedMilliseconds}ms");
-                                sw.Restart();
-                            }
-
-                            disInstance = await _discordAccountHelper.CreateDiscordInstance(account)!;
-                            disInstance.IsInit = true;
-                            _discordLoadBalancer.AddInstance(disInstance);
 
                             sw.Stop();
-                            info.AppendLine($"{account.Id}初始化中... 创建实例耗时: {sw.ElapsedMilliseconds}ms");
+                            info.AppendLine($"{account.Id}初始化中... 获取 MJ 私聊频道 ID 耗时: {sw.ElapsedMilliseconds}ms");
                             sw.Restart();
 
-                            // 这里应该等待初始化完成，并获取用户信息验证，获取用户成功后设置为可用状态
-                            // 多账号启动时，等待一段时间再启动下一个账号
-                            await Task.Delay(1000 * 5);
-
-                            if (!account.IsYouChuan && !account.IsOfficial)
+                            try
                             {
-                                try
+                                Thread.Sleep(500);
+                                var id = await _discordAccountHelper.GetBotPrivateId(account, EBotType.NIJI_JOURNEY);
+                                if (!string.IsNullOrWhiteSpace(id))
                                 {
-                                    // 启动后执行 info setting 操作
-                                    await _taskService.InfoSetting(account.Id);
+                                    account.NijiBotChannelId = id;
                                 }
-                                catch (Exception ex)
-                                {
-                                    _logger.Error(ex, "同步 info 异常 {@0}", account.ChannelId);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.Error(ex, "获取 NIJI 私聊频道 ID 异常 {@0}", account.ChannelId);
 
-                                    info.AppendLine($"{account.Id}初始化中... 同步 info 异常");
-                                }
+                                info.AppendLine($"{account.Id}初始化中... 获取 NIJI 私聊频道 ID 异常");
+                            }
+
+                            sw.Stop();
+                            info.AppendLine($"{account.Id}初始化中... 获取 NIJI 私聊频道 ID 耗时: {sw.ElapsedMilliseconds}ms");
+                            sw.Restart();
+                        }
+
+                        db.Update("NijiBotChannelId,PrivateChannelId,AllowModes,SubChannels,SubChannelValues,FastExhausted", account);
+                        account.ClearCache();
+
+                        // 启用自动验证账号功能
+                        // 连接前先判断账号是否正常
+                        if (setting.EnableAutoVerifyAccount && !account.IsYouChuan && !account.IsOfficial)
+                        {
+                            var success = await _discordAccountHelper.ValidateAccount(account);
+                            if (!success)
+                            {
+                                throw new Exception("账号不可用");
+                            }
+
+                            sw.Stop();
+                            info.AppendLine($"{account.Id}初始化中... 验证账号耗时: {sw.ElapsedMilliseconds}ms");
+                            sw.Restart();
+                        }
+
+                        disInstance = await _discordAccountHelper.CreateDiscordInstance(account)!;
+                        disInstance.IsInit = true;
+                        _discordLoadBalancer.AddInstance(disInstance);
+
+                        sw.Stop();
+                        info.AppendLine($"{account.Id}初始化中... 创建实例耗时: {sw.ElapsedMilliseconds}ms");
+                        sw.Restart();
+
+                        // 高频同步 info setting 一定会封号
+                        if (!account.IsYouChuan && !account.IsOfficial)
+                        {
+                            try
+                            {
+                                // 这里应该等待初始化完成，并获取用户信息验证，获取用户成功后设置为可用状态
+                                // 多账号启动时，等待一段时间再启动下一个账号
+                                await Task.Delay(1000 * 5);
+
+                                // 启动后执行 info setting 操作
+                                await _taskService.InfoSetting(account.Id);
 
                                 sw.Stop();
                                 info.AppendLine($"{account.Id}初始化中... 同步 info 耗时: {sw.ElapsedMilliseconds}ms");
                                 sw.Restart();
                             }
-                        }
+                            catch (Exception ex)
+                            {
+                                _logger.Error(ex, "同步 info 异常 {@0}", account.ChannelId);
 
-                        // 慢速切换快速模式检查
-                        if (account.EnableRelaxToFast == true && !account.IsYouChuan && !account.IsOfficial)
-                        {
-                            await disInstance?.RelaxToFastValidate();
-                            sw.Stop();
-                            info.AppendLine($"{account.Id}初始化中... 慢速切换快速模式检查耗时: {sw.ElapsedMilliseconds}ms");
-                            sw.Restart();
+                                info.AppendLine($"{account.Id}初始化中... 同步 info 异常");
+                            }
                         }
+                    }
 
-                        // 启用自动同步信息和设置
-                        if (setting.EnableAutoSyncInfoSetting && !account.IsYouChuan && !account.IsOfficial)
+                    // 无最大并行限制
+                    if (GlobalConfiguration.GlobalMaxConcurrent != 0)
+                    {
+                        // discord 账号信息同步
+                        if (!account.IsYouChuan && !account.IsOfficial)
                         {
-                            // 每 6~12 小时，同步账号信息
-                            await disInstance?.RandomSyncInfo();
-                            sw.Stop();
-                            info.AppendLine($"{account.Id}初始化中... 随机同步信息耗时: {sw.ElapsedMilliseconds}ms");
-                            sw.Restart();
+                            // 慢速切换快速模式检查
+                            if (account.EnableRelaxToFast == true)
+                            {
+                                await disInstance?.RelaxToFastValidate();
+                                sw.Stop();
+                                info.AppendLine($"{account.Id}初始化中... 慢速切换快速模式检查耗时: {sw.ElapsedMilliseconds}ms");
+                                sw.Restart();
+                            }
+
+                            // 启用自动同步信息和设置
+                            if (setting.EnableAutoSyncInfoSetting)
+                            {
+                                // 每 6~12 小时，同步账号信息
+                                await disInstance?.RandomSyncInfo();
+                                sw.Stop();
+                                info.AppendLine($"{account.Id}初始化中... 随机同步信息耗时: {sw.ElapsedMilliseconds}ms");
+                                sw.Restart();
+                            }
                         }
 
                         if (account.IsYouChuan)
@@ -1071,98 +1255,87 @@ namespace Midjourney.API
                             await disInstance?.OfficialSyncInfo();
                         }
                     }
-                    else
-                    {
-                        sw.Stop();
-                        info.AppendLine($"{account.Id}初始化中... 非工作时间，不创建实例耗时: {sw.ElapsedMilliseconds}ms");
-                        sw.Restart();
-
-                        // 非工作时间内，如果存在实例则释放
-                        if (disInstance != null)
-                        {
-                            _discordLoadBalancer.RemoveInstance(disInstance);
-                            disInstance.Dispose();
-                        }
-
-                        sw.Stop();
-                        info.AppendLine($"{account.Id}初始化中... 非工作时间，释放实例耗时: {sw.ElapsedMilliseconds}ms");
-                        sw.Restart();
-                    }
                 }
-                catch (Exception ex)
+                else
                 {
                     sw.Stop();
-                    info.AppendLine($"{account.Id}初始化中... 异常: {ex.Message} 耗时: {sw.ElapsedMilliseconds}ms");
+                    info.AppendLine($"{account.Id}初始化中... 非工作时间，不创建实例耗时: {sw.ElapsedMilliseconds}ms");
                     sw.Restart();
 
-                    _logger.Error(ex, "Account({@0}) init fail, disabled: {@1}", account.ChannelId, ex.Message);
-
-                    if (setting.EnableAutoLogin && !account.IsYouChuan && !account.IsOfficial)
+                    // 非工作时间内，如果存在实例则释放
+                    if (disInstance != null)
                     {
-                        sw.Stop();
-                        info.AppendLine($"{account.Id}尝试自动登录...");
-                        sw.Restart();
+                        _discordLoadBalancer.RemoveInstance(disInstance);
+                        disInstance.Dispose();
+                    }
 
-                        try
+                    sw.Stop();
+                    info.AppendLine($"{account.Id}初始化中... 非工作时间，释放实例耗时: {sw.ElapsedMilliseconds}ms");
+                    sw.Restart();
+                }
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                info.AppendLine($"{account.ChannelId} 初始化中... 异常: {ex.Message} 耗时: {sw.ElapsedMilliseconds}ms");
+                sw.Restart();
+
+                _logger.Error(ex, $"{account.ChannelId} 初始化失败");
+
+                if (setting.EnableAutoLogin && !account.IsYouChuan && !account.IsOfficial)
+                {
+                    sw.Stop();
+                    info.AppendLine($"{account.Id}尝试自动登录...");
+                    sw.Restart();
+
+                    try
+                    {
+                        // 开始尝试自动登录
+                        var suc = DiscordAccountHelper.AutoLogin(account, true);
+
+                        if (suc)
                         {
-                            // 开始尝试自动登录
-                            var suc = DiscordAccountHelper.AutoLogin(account, true);
-
-                            if (suc)
-                            {
-                                sw.Stop();
-                                info.AppendLine($"{account.Id}自动登录请求成功...");
-                                sw.Restart();
-                            }
-                            else
-                            {
-                                sw.Stop();
-                                info.AppendLine($"{account.Id}自动登录请求失败...");
-                                sw.Restart();
-                            }
-                        }
-                        catch (Exception exa)
-                        {
-                            _logger.Error(exa, "Account({@0}) auto login fail, disabled: {@1}", account.ChannelId, exa.Message);
-
                             sw.Stop();
-                            info.AppendLine($"{account.Id}自动登录请求异常...");
+                            info.AppendLine($"{account.Id}自动登录请求成功...");
+                            sw.Restart();
+                        }
+                        else
+                        {
+                            sw.Stop();
+                            info.AppendLine($"{account.Id}自动登录请求失败...");
                             sw.Restart();
                         }
                     }
+                    catch (Exception exa)
+                    {
+                        _logger.Error(exa, "Account({@0}) auto login fail, disabled: {@1}", account.ChannelId, exa.Message);
 
-                    account.Enable = false;
-                    account.DisabledReason = ex.Message ?? "初始化失败";
-
-                    db.Update(account);
-
-                    disInstance?.ClearAccountCache(account.Id);
-                    disInstance = null;
-
-                    // 清除缓存
-                    ClearAccountCache(account.Id);
-
-                    sw.Stop();
-                    info.AppendLine($"{account.Id}初始化中... 异常，禁用账号耗时: {sw.ElapsedMilliseconds}ms");
-                    sw.Restart();
+                        sw.Stop();
+                        info.AppendLine($"{account.Id}自动登录请求异常...");
+                        sw.Restart();
+                    }
                 }
-                finally
-                {
-                    swAll.Stop();
-                    info.AppendLine($"{account.Id}初始化完成, 总耗时: {swAll.ElapsedMilliseconds}ms");
 
-                    _logger.Information(info.ToString());
-                }
-            });
+                account.Enable = false;
+                account.DisabledReason = ex.Message ?? "初始化失败";
 
-            // 未获取到锁时，是否抛出异常
-            // 如果验证锁，但未获取锁时，抛出异常
-            if (isValidateLock && !isLock)
-            {
-                throw new LogicException("初始化中，请稍后重试");
+                db.Update(account);
+                account.ClearCache();
+
+                disInstance = null;
+
+                sw.Stop();
+                info.AppendLine($"{account.Id}初始化中... 异常，禁用账号耗时: {sw.ElapsedMilliseconds}ms");
+                sw.Restart();
             }
+            finally
+            {
+                swAll.Stop();
 
-            await Task.CompletedTask;
+                info.Append($"{account.ChannelId} 检查完成, 总耗时: {swAll.ElapsedMilliseconds}ms");
+
+                _logger.Information(info.ToString());
+            }
         }
 
         /// <summary>
@@ -1242,7 +1415,7 @@ namespace Midjourney.API
         /// 更新账号信息
         /// </summary>
         /// <param name="param"></param>
-        public async Task UpdateAccount(DiscordAccount param)
+        public async Task<DiscordAccount> UpdateAccount(DiscordAccount param)
         {
             var model = DbHelper.Instance.AccountStore.Get(param.Id);
             if (model == null)
@@ -1251,161 +1424,157 @@ namespace Midjourney.API
             }
 
             // 更新一定要加锁，因为其他进程会修改 account 值，导致值覆盖
-            var isLock = await AsyncLocalLock.TryLockAsync($"initialize:{model.Id}", TimeSpan.FromSeconds(5), async () =>
-            {
-                model = DbHelper.Instance.AccountStore.Get(model.Id)!;
-
-                // 渠道 ID 和 服务器 ID 禁止修改
-                //model.ChannelId = account.ChannelId;
-                //model.GuildId = account.GuildId;
-
-                // 清空禁用原因
-                if (model.IsYouChuan || model.IsOfficial)
-                {
-                    model.DisabledReason = null;
-                }
-
-                // 更新账号重连时，自动解锁
-                model.Lock = false;
-                model.CfHashCreated = null;
-                model.CfHashUrl = null;
-                model.CfUrl = null;
-
-                // 清除风控状态
-                model.RiskControlUnlockTime = null;
-
-                // 验证 Interval
-                if (param.Interval < 0m)
-                {
-                    param.Interval = 0m;
-                }
-
-                // 最大并行数
-                if (param.CoreSize > 12)
-                {
-                    param.CoreSize = 12;
-                }
-
-                // 验证 WorkTime
-                if (!string.IsNullOrEmpty(param.WorkTime))
-                {
-                    var ts = param.WorkTime.ToTimeSlots();
-                    if (ts.Count == 0)
-                    {
-                        param.WorkTime = null;
-                    }
-                }
-
-                // 验证 FishingTime
-                if (!string.IsNullOrEmpty(param.FishingTime))
-                {
-                    var ts = param.FishingTime.ToTimeSlots();
-                    if (ts.Count == 0)
-                    {
-                        param.FishingTime = null;
-                    }
-                }
-
-                model.LoginAccount = param.LoginAccount?.Trim();
-                model.LoginPassword = param.LoginPassword?.Trim();
-                model.Login2fa = param.Login2fa?.Trim();
-                model.IsAutoLogining = false; // 重置自动登录状态
-                model.LoginStart = null;
-                model.LoginEnd = null;
-                model.LoginMessage = null;
-
-                model.EnableAutoSetRelax = param.EnableAutoSetRelax;
-                model.EnableRelaxToFast = param.EnableRelaxToFast;
-                model.EnableFastToRelax = param.EnableFastToRelax;
-                model.IsBlend = param.IsBlend;
-                model.IsDescribe = param.IsDescribe;
-                model.IsShorten = param.IsShorten;
-                model.DayDrawLimit = param.DayDrawLimit;
-                model.DayRelaxDrawLimit = param.DayRelaxDrawLimit;
-                model.IsVerticalDomain = param.IsVerticalDomain;
-                model.VerticalDomainIds = param.VerticalDomainIds;
-                model.SubChannels = param.SubChannels;
-
-                model.PermanentInvitationLink = param.PermanentInvitationLink;
-                model.FishingTime = param.FishingTime;
-                model.EnableNiji = param.EnableNiji;
-                model.EnableMj = param.EnableMj;
-                model.AllowModes = param.AllowModes;
-                model.WorkTime = param.WorkTime;
-                model.Interval = param.Interval;
-                model.AfterIntervalMin = param.AfterIntervalMin;
-                model.AfterIntervalMax = param.AfterIntervalMax;
-                model.Sort = param.Sort;
-                model.Enable = param.Enable;
-                model.PrivateChannelId = param.PrivateChannelId;
-                model.NijiBotChannelId = param.NijiBotChannelId;
-                model.UserAgent = param.UserAgent;
-                model.RemixAutoSubmit = param.RemixAutoSubmit;
-                model.CoreSize = param.CoreSize;
-                model.QueueSize = param.QueueSize;
-                model.RelaxQueueSize = param.RelaxQueueSize;
-                model.RelaxCoreSize = param.RelaxCoreSize;
-
-                model.TimeoutMinutes = param.TimeoutMinutes;
-                model.Weight = param.Weight;
-                model.Remark = param.Remark;
-                model.BotToken = param.BotToken;
-                model.UserToken = param.UserToken;
-                model.Mode = param.Mode;
-                model.Sponsor = param.Sponsor;
-                model.IsHdVideo = param.IsHdVideo;
-                model.IsRelaxVideo = param.IsRelaxVideo;
-                model.OfficialEnablePersonalize = param.OfficialEnablePersonalize;
-
-                DbHelper.Instance.AccountStore.Update(model);
-
-                var disInstance = _discordLoadBalancer.GetDiscordInstance(model.ChannelId);
-                disInstance?.ClearAccountCache(model.Id);
-
-                // 清除缓存
-                ClearAccountCache(model.Id);
-
-                await Task.CompletedTask;
-            });
-            if (!isLock)
+            await using var lockHandle = await AdaptiveLock.LockAsync(model.InitializationLockKey, 5);
+            if (!lockHandle.IsAcquired)
             {
                 throw new LogicException("作业执行中，请稍后重试");
             }
+
+            model = DbHelper.Instance.AccountStore.Get(model.Id)!;
+
+            // 清空禁用原因
+            if (model.IsYouChuan || model.IsOfficial)
+            {
+                model.DisabledReason = null;
+            }
+
+            // 更新账号重连时，自动解锁
+            model.Lock = false;
+            model.CfHashCreated = null;
+            model.CfHashUrl = null;
+            model.CfUrl = null;
+
+            // 清除风控状态
+            model.RiskControlUnlockTime = null;
+
+            // 验证 Interval
+            if (param.Interval < 0m)
+            {
+                param.Interval = 0m;
+            }
+
+            // 最大并行数
+            if (param.CoreSize > 12)
+            {
+                param.CoreSize = 12;
+            }
+
+            // 验证 WorkTime
+            if (!string.IsNullOrEmpty(param.WorkTime))
+            {
+                var ts = param.WorkTime.ToTimeSlots();
+                if (ts.Count == 0)
+                {
+                    param.WorkTime = null;
+                }
+            }
+
+            // 验证 FishingTime
+            if (!string.IsNullOrEmpty(param.FishingTime))
+            {
+                var ts = param.FishingTime.ToTimeSlots();
+                if (ts.Count == 0)
+                {
+                    param.FishingTime = null;
+                }
+            }
+
+            model.LoginAccount = param.LoginAccount?.Trim();
+            model.LoginPassword = param.LoginPassword?.Trim();
+            model.Login2fa = param.Login2fa?.Trim();
+            model.IsAutoLogining = false; // 重置自动登录状态
+            model.LoginStart = null;
+            model.LoginEnd = null;
+            model.LoginMessage = null;
+
+            model.EnableAutoSetRelax = param.EnableAutoSetRelax;
+            model.EnableRelaxToFast = param.EnableRelaxToFast;
+            model.EnableFastToRelax = param.EnableFastToRelax;
+            model.IsBlend = param.IsBlend;
+            model.IsDescribe = param.IsDescribe;
+            model.IsShorten = param.IsShorten;
+            model.DayDrawLimit = param.DayDrawLimit;
+            model.DayRelaxDrawLimit = param.DayRelaxDrawLimit;
+            model.IsVerticalDomain = param.IsVerticalDomain;
+            model.VerticalDomainIds = param.VerticalDomainIds;
+            model.SubChannels = param.SubChannels;
+
+            model.PermanentInvitationLink = param.PermanentInvitationLink;
+            model.FishingTime = param.FishingTime;
+            model.EnableNiji = param.EnableNiji;
+            model.EnableMj = param.EnableMj;
+            model.AllowModes = param.AllowModes;
+            model.WorkTime = param.WorkTime;
+            model.Interval = param.Interval;
+            model.AfterIntervalMin = param.AfterIntervalMin;
+            model.AfterIntervalMax = param.AfterIntervalMax;
+            model.Sort = param.Sort;
+            model.Enable = param.Enable;
+            model.PrivateChannelId = param.PrivateChannelId;
+            model.NijiBotChannelId = param.NijiBotChannelId;
+            model.UserAgent = param.UserAgent;
+            model.RemixAutoSubmit = param.RemixAutoSubmit;
+            model.CoreSize = param.CoreSize;
+            model.QueueSize = param.QueueSize;
+            model.RelaxQueueSize = param.RelaxQueueSize;
+            model.RelaxCoreSize = param.RelaxCoreSize;
+
+            model.TimeoutMinutes = param.TimeoutMinutes;
+            model.Weight = param.Weight;
+            model.Remark = param.Remark;
+            model.BotToken = param.BotToken;
+            model.UserToken = param.UserToken;
+            model.Mode = param.Mode;
+            model.Sponsor = param.Sponsor;
+            model.IsHdVideo = param.IsHdVideo;
+            model.IsRelaxVideo = param.IsRelaxVideo;
+            model.OfficialEnablePersonalize = param.OfficialEnablePersonalize;
+
+            DbHelper.Instance.AccountStore.Update(model);
+
+            model.ClearCache();
+
+            return model;
         }
 
         /// <summary>
-        /// 清理账号缓存
-        /// </summary>
-        /// <param name="id"></param>
-        public void ClearAccountCache(string id)
-        {
-            _memoryCache.Remove($"account:{id}");
-        }
-
-        /// <summary>
-        /// 更新并重新连接账号
+        /// 释放账号连接
         /// </summary>
         /// <param name="account"></param>
-        public async Task ReconnectAccount(DiscordAccount account)
+        public void DisposeAccount(DiscordAccount account)
         {
             try
             {
-                // 如果正在执行则释放
-                var disInstance = _discordLoadBalancer.GetDiscordInstance(account.ChannelId);
-                if (disInstance != null)
+                // 如果是悠船或官方，只有修改令牌才释放
+                if (account.Enable == true && (account.IsYouChuan || account.IsOfficial))
                 {
-                    _discordLoadBalancer.RemoveInstance(disInstance);
-                    disInstance.Dispose();
+                    // 如果正在执行则释放
+                    var disInstance = _discordLoadBalancer.GetDiscordInstance(account.ChannelId);
+                    if (disInstance != null)
+                    {
+                        // 如果令牌修改了，则必须移除
+                        if (account.UserToken != disInstance?.Account.UserToken)
+                        {
+                            _discordLoadBalancer.RemoveInstance(disInstance);
+                            disInstance.Dispose();
+                        }
+                    }
+                }
+                else
+                {
+                    // 如果正在执行则释放
+                    var disInstance = _discordLoadBalancer.GetDiscordInstance(account.ChannelId);
+                    if (disInstance != null)
+                    {
+                        _discordLoadBalancer.RemoveInstance(disInstance);
+                        disInstance.Dispose();
+                    }
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Log.Warning(ex, "账号重连释放失败 {@0}", account.ChannelId);
             }
-
-            await UpdateAccount(account);
-
-            // 异步执行
-            _ = StartCheckAccount(account);
         }
 
         /// <summary>
@@ -1415,7 +1584,6 @@ namespace Midjourney.API
         public void DeleteAccount(string id)
         {
             var model = DbHelper.Instance.AccountStore.Get(id);
-
             if (model != null)
             {
                 try
@@ -1431,6 +1599,7 @@ namespace Midjourney.API
                 {
                 }
 
+                model.ClearCache();
                 DbHelper.Instance.AccountStore.Delete(id);
             }
         }
@@ -1458,6 +1627,114 @@ namespace Midjourney.API
             _timer?.Change(Timeout.Infinite, 0);
 
             await Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// 处理 Redis 消息通知
+        /// </summary>
+        /// <param name="notification"></param>
+        public async Task OnRedisReceived(RedisNotification notification)
+        {
+            try
+            {
+                var isSelf = notification.Hostname == Environment.MachineName;
+                var use = (int)(DateTime.Now - notification.Timestamp).TotalMilliseconds;
+
+                _logger.Information("收到订阅消息, 用时: {@7} ms, 来源: {@5} -> {@6}, self: {@0}, type: {@1}, cid: {@2}, tid: {@3}, tiId: {@4}",
+                    isSelf,
+                    notification.Type, notification.ChannelId, notification.TaskInfoId, notification.TaskInfo?.Id,
+                    notification.Hostname, Environment.MachineName,
+                    use);
+
+                switch (notification.Type)
+                {
+                    case ENotificationType.AccountCache:
+                        {
+                            // 清除账号缓存消息
+                            var instance = _discordLoadBalancer.GetDiscordInstance(notification.ChannelId);
+                            if (instance != null)
+                            {
+                                // 仅清理本地缓存
+                                instance.Account.ClearCache(false);
+
+                                // 判断账号是否被删除了
+                                if (!string.IsNullOrWhiteSpace(instance.Account.Id))
+                                {
+                                    var account = DbHelper.Instance.AccountStore.Get(instance.Account.Id);
+                                    if (account == null)
+                                    {
+                                        instance?.Dispose(false);
+                                    }
+                                }
+                            }
+                        }
+                        break;
+
+                    case ENotificationType.CancelTaskInfo:
+                        {
+                            // 判断是否自身发出的
+                            if (isSelf)
+                            {
+                                return;
+                            }
+
+                            var targetTask = _discordLoadBalancer.GetRunningTasks().FirstOrDefault(t => t.Id == notification.TaskInfoId);
+
+                            // 如果任务不在队列中，则从存储中获取
+                            if (targetTask == null)
+                            {
+                                targetTask = DbHelper.Instance.TaskStore.Get(notification.TaskInfoId);
+                            }
+
+                            if (targetTask != null)
+                            {
+                                if (!targetTask.IsCompleted)
+                                {
+                                    targetTask.Fail("取消任务");
+
+                                    DbHelper.Instance.TaskStore.Update(targetTask);
+                                }
+                            }
+                        }
+                        break;
+
+                    case ENotificationType.CompleteTaskInfo:
+                        {
+                            // 判断是否自身发出的
+                            if (isSelf)
+                            {
+                                return;
+                            }
+
+                            DrawCounter.Complete(notification.TaskInfo, notification.IsSuccess, false);
+                        }
+                        break;
+
+                    case ENotificationType.DisposeLock:
+                    case ENotificationType.EnqueueTaskInfo:
+                        {
+                            // 通知任务可以立即执行
+                            var instance = _discordLoadBalancer.GetDiscordInstance(notification.ChannelId);
+                            instance?.NotifyRedisJob();
+                        }
+                        break;
+
+                    case ENotificationType.SeedTaskInfo:
+                        {
+                            // 收到获取种子任务请求
+                            var instance = _discordLoadBalancer.GetDiscordInstance(notification.ChannelId);
+                            await instance?.GetSeed(notification.TaskInfo);
+                        }
+                        break;
+
+                    default:
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, "处理 Redis 消息通知异常 {@0}", notification.ToJson());
+            }
         }
     }
 }

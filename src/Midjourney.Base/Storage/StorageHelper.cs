@@ -142,6 +142,7 @@ namespace Midjourney.Base.Storage
                 return;
             }
 
+            // 合作商加速链接不处理
             if (!string.IsNullOrWhiteSpace(setting.LocalStorage?.PartnerCdn))
             { 
                 var partnerCdnUri = new Uri(setting.LocalStorage.PartnerCdn);
@@ -765,9 +766,9 @@ namespace Midjourney.Base.Storage
         {
             if (info?.IsPartner == true && !string.IsNullOrWhiteSpace(url) && GlobalConfiguration.Setting.EnableYouChuanInternalDownload)
             {
-                if (url.Contains("youchuan-imagine.oss-cn-shanghai.aliyuncs.com"))
+                if (url.Contains(TaskInfo.YOUCHUAN_CDN, StringComparison.OrdinalIgnoreCase))
                 {
-                    return url.Replace("youchuan-imagine.oss-cn-shanghai.aliyuncs.com", "youchuan-imagine.oss-cn-shanghai-internal.aliyuncs.com");
+                    return url.Replace(TaskInfo.YOUCHUAN_CDN, TaskInfo.YOUCHUAN_CDN_INTERNAL);
                 }
             }
             return url;

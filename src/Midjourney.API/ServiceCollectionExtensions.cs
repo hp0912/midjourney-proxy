@@ -22,6 +22,7 @@
 // invasion of privacy, or any other unlawful purposes is strictly prohibited. 
 // Violation of these terms may result in termination of the license and may subject the violator to legal action.
 
+using System.Reflection;
 using Midjourney.Infrastructure.Handle;
 using Midjourney.Infrastructure.LoadBalancer;
 using Midjourney.Infrastructure.Services;
@@ -70,21 +71,25 @@ namespace Midjourney.API
             services.AddSingleton<INotifyService, NotifyServiceImpl>();
 
             // 翻译服务
-            if (config.TranslateWay == TranslateWay.GPT)
+            if (config.TranslateWay == TranslateWay.GPT
+                && !string.IsNullOrWhiteSpace(config.Openai?.GptApiKey))
             {
-                services.AddSingleton<ITranslateService, GPTTranslateService>();
+                var gptTranslate = new GPTTranslateService();
+                TranslateHelper.Initialize(gptTranslate);
+            }
+            else if (config.TranslateWay == TranslateWay.BAIDU
+                && !string.IsNullOrWhiteSpace(config.BaiduTranslate?.AppSecret))
+            {
+                var baiduTranslate = new BaiduTranslateService();
+                TranslateHelper.Initialize(baiduTranslate);
             }
             else
             {
-                services.AddSingleton<ITranslateService, BaiduTranslateService>();
+                TranslateHelper.Initialize(null);
             }
 
             // 存储服务
             StorageHelper.Configure();
-
-            // 缓存服务
-            // 缓存
-            GlobalCacheHelper.Configure();
 
             // 任务服务
             services.AddSingleton<ITaskStoreService, TaskRepository>();
@@ -120,6 +125,12 @@ namespace Midjourney.API
 
             // 任务服务
             services.AddSingleton<ITaskService, TaskService>();
+
+            // 注册 MediatR
+            services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly()));
+
+            services.AddBaseServices(config);
+            services.AddInfrastructureServices(config);
         }
     }
 }

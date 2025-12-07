@@ -28,6 +28,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using CSRedis;
 using LiteDB;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -302,10 +303,7 @@ namespace Midjourney.API.Controllers
 
                         // 更新账号信息
                         DbHelper.Instance.AccountStore.Update(item);
-
-                        // 清空缓存
-                        var inc = _loadBalancer.GetDiscordInstance(item.ChannelId);
-                        inc?.ClearAccountCache(item.Id);
+                        item.ClearCache();
 
                         if (!request.Success)
                         {
@@ -414,7 +412,6 @@ namespace Midjourney.API.Controllers
                 .Select(f => new FileInfo(f))
                 .OrderByDescending(f => f.LastWriteTime)
                 .ToList();
-
 
             // 项目目录，而不是 AppContext.BaseDirectory
             //var logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"logs/{logName}{DateTime.Now:yyyyMMdd}.txt");
@@ -684,10 +681,7 @@ namespace Midjourney.API.Controllers
 
                         // 更新账号信息
                         DbHelper.Instance.AccountStore.Update(item);
-
-                        // 清空缓存
-                        var inc = _loadBalancer.GetDiscordInstance(item.ChannelId);
-                        inc?.ClearAccountCache(item.Id);
+                        item.ClearCache();
 
                         if (!request.Success)
                         {
@@ -770,15 +764,11 @@ namespace Midjourney.API.Controllers
                             // https://editor.midjourney.com/captcha/challenge/index.html?hash=OOUxejO94EQNxsCODRVPbg&token=dXDm-gSb4Zlsx-PCkNVyhQ
 
                             var url = $"https://editor.midjourney.com/captcha/challenge/index.html?hash={hashStr}&token={token}";
-
                             item.CfUrl = url;
 
                             // 更新账号信息
                             DbHelper.Instance.AccountStore.Update(item);
-
-                            // 清空缓存
-                            var inc = _loadBalancer.GetDiscordInstance(item.ChannelId);
-                            inc?.ClearAccountCache(item.Id);
+                            item.ClearCache();
                         }
                     }
                     else
@@ -811,11 +801,6 @@ namespace Midjourney.API.Controllers
                 throw new LogicException("账号不存在");
             }
 
-            //if (!item.Lock)
-            //{
-            //    throw new LogicException("不需要 CF 验证");
-            //}
-
             item.Lock = false;
             item.CfHashUrl = null;
             item.CfHashCreated = null;
@@ -824,10 +809,7 @@ namespace Midjourney.API.Controllers
 
             // 更新账号信息
             DbHelper.Instance.AccountStore.Update(item);
-
-            // 清空缓存
-            var inc = _loadBalancer.GetDiscordInstance(item.ChannelId);
-            inc?.ClearAccountCache(item.Id);
+            item.ClearCache();
 
             return Result.Ok();
         }
@@ -943,7 +925,7 @@ namespace Midjourney.API.Controllers
             DbHelper.Instance.AccountStore.Add(account);
 
             // 后台执行
-            _ = _discordAccountInitializer.StartCheckAccount(account);
+            _ = _discordAccountInitializer.StartAccount(account);
 
             // 更新缓存
             if (setting.EnableAccountSponsor && user.Role != EUserRole.ADMIN)
@@ -976,11 +958,6 @@ namespace Midjourney.API.Controllers
             {
                 return Result.Fail("未开启赞助功能，禁止操作");
             }
-
-            //if (_isAnonymous)
-            //{
-            //    return Result.Fail("演示模式，禁止操作");
-            //}
 
             var model = DbHelper.Instance.AccountStore.Get(param.Id);
             if (model == null)
@@ -1089,23 +1066,25 @@ namespace Midjourney.API.Controllers
                 return Result.Fail("无权限操作");
             }
 
-            // 悠船
+            param.ChannelId = model.ChannelId;
+            param.GuildId = model.GuildId;
+
+            // 悠船/官方
             if (model.IsYouChuan || model.IsOfficial)
             {
-                param.ChannelId = model.ChannelId;
-                param.GuildId = model.GuildId;
                 param.EnableMj = true;
                 param.EnableNiji = true;
                 param.IsShorten = false;
             }
 
-            // 不可修改频道 ID
-            if (param.GuildId != model.GuildId || param.ChannelId != model.ChannelId)
-            {
-                return Result.Fail("禁止修改频道 ID 和服务器 ID");
-            }
+            // 更新账号信息
+            var account = await _discordAccountInitializer.UpdateAccount(param);
 
-            await _discordAccountInitializer.ReconnectAccount(param);
+            // 释放连接
+            _discordAccountInitializer.DisposeAccount(account);
+
+            // 启动连接
+            await _discordAccountInitializer.StartAccount(account);
 
             return Result.Ok();
         }
@@ -1140,11 +1119,6 @@ namespace Midjourney.API.Controllers
             {
                 return Result.Fail("无权限操作");
             }
-
-            //if (_isAnonymous)
-            //{
-            //    return Result.Fail("演示模式，禁止操作");
-            //}
 
             _discordAccountInitializer.DeleteAccount(id);
 
@@ -1669,7 +1643,6 @@ namespace Midjourney.API.Controllers
                    .Limit(page.PageSize)
                    .ToList();
 
-
                 // 计算用户累计绘图
                 var userIds = list.Select(c => c.Id).ToList();
                 if (userIds.Count > 0)
@@ -1724,7 +1697,6 @@ namespace Midjourney.API.Controllers
 
             // 统计今日绘图数量
             var drawCounter = DrawCounter.UserTodadSuccessCounter;
-
 
             foreach (var item in list)
             {
@@ -2184,7 +2156,7 @@ namespace Midjourney.API.Controllers
         [HttpGet("setting")]
         public Result<Setting> GetSetting()
         {
-            var model = LiteDBHelper.SettingStore.Get(Constants.DEFAULT_SETTING_ID);
+            var model = GlobalConfiguration.Setting.DeepClone();
             if (model == null)
             {
                 throw new LogicException("系统配置错误，请重启服务");
@@ -2212,10 +2184,10 @@ namespace Midjourney.API.Controllers
                     model.Openai.GptApiKey = "****";
                 }
 
-                //if (!string.IsNullOrWhiteSpace(model.MongoDefaultConnectionString))
-                //{
-                //    model.MongoDefaultConnectionString = "****";
-                //}
+                if (!string.IsNullOrWhiteSpace(model.MongoDefaultConnectionString))
+                {
+                    model.MongoDefaultConnectionString = "****";
+                }
 
                 if (model.AliyunOss != null)
                 {
@@ -2288,6 +2260,20 @@ namespace Midjourney.API.Controllers
                 return Result.Fail("演示模式，禁止操作");
             }
 
+            // 如果是 mongodb 则验证数据库名称
+            if (setting.DatabaseType == DatabaseType.MongoDB)
+            {
+                if (string.IsNullOrWhiteSpace(setting.DatabaseName))
+                {
+                    return Result.Fail("请输入数据库名称");
+                }
+            }
+            var dbSuccess = DbHelper.Verify(setting.DatabaseType, setting.DatabaseConnectionString, setting.DatabaseName);
+            if (!dbSuccess)
+            {
+                return Result.Fail("数据库连接失败，请检查连接字符串/名称是否正确");
+            }
+
             try
             {
                 // 保存时验证授权
@@ -2306,12 +2292,28 @@ namespace Midjourney.API.Controllers
                 return Result.Fail("授权验证失败，请检查授权码是否正确，如果没有授权码，请输入默认授权码：trueai.org");
             }
 
+            // 如果启用了 Consul，必须授权才能使用
+            if (setting.ConsulOptions?.Enable == true)
+            {
+                if (setting.LicenseKey.Equals("trueai.org", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Result.Fail("购买授权后，才允许使用 Consul 功能");
+                }
+
+                var success = await SettingDb.Instance.IsConsulAvailableAsync(setting);
+                if (!success)
+                {
+                    return Result.Fail("Consul 连接失败，请检查 Consul 地址/服务名称是否正确");
+                }
+            }
+
             // 如果启用了 redis 则验证
-            if (setting.EnableRedis)
+            CSRedisClient csredis = null;
+            if (setting.IsValidRedis)
             {
                 try
                 {
-                    var csredis = new CSRedis.CSRedisClient(setting.RedisConnectionString);
+                    csredis = new CSRedisClient(setting.RedisConnectionString);
                     if (!csredis.Ping())
                     {
                         return Result.Fail("Redis 连接失败，请检查连接字符串是否正确");
@@ -2323,6 +2325,8 @@ namespace Midjourney.API.Controllers
                     return Result.Fail("Redis 连接失败，请检查连接字符串是否正确");
                 }
             }
+            AdaptiveLock.Initialization(csredis);
+            AdaptiveCache.Initialization(csredis);
 
             // 如果启用了风控验证
             if (setting.EnableRiskControlAutoCaptcha)
@@ -2333,11 +2337,27 @@ namespace Midjourney.API.Controllers
                 }
             }
 
+            // 翻译服务
+            if (setting.TranslateWay == TranslateWay.GPT
+                && !string.IsNullOrWhiteSpace(setting.Openai?.GptApiKey))
+            {
+                var gptTranslate = new GPTTranslateService();
+                TranslateHelper.Initialize(gptTranslate);
+            }
+            else if (setting.TranslateWay == TranslateWay.BAIDU
+                && !string.IsNullOrWhiteSpace(setting.BaiduTranslate?.AppSecret))
+            {
+                var baiduTranslate = new BaiduTranslateService();
+                TranslateHelper.Initialize(baiduTranslate);
+            }
+            else
+            {
+                TranslateHelper.Initialize(null);
+            }
+
             setting.Id = Constants.DEFAULT_SETTING_ID;
 
-            LiteDBHelper.SettingStore.Update(setting);
-
-            GlobalConfiguration.Setting = setting;
+            await SettingDb.Instance.SaveAsync(setting);
 
             // 日志级别
             Program.SetLogLevel(setting.LogEventLevel);
@@ -2345,16 +2365,8 @@ namespace Midjourney.API.Controllers
             // 存储服务
             StorageHelper.Configure();
 
-            // 缓存
-            GlobalCacheHelper.Configure();
-
             // 首页缓存
-            _memoryCache.Remove("HOME");
-
-            var now = DateTime.Now.ToString("yyyyMMdd");
-            var key = $"{now}_home";
-
-            _memoryCache.Remove(key);
+            _memoryCache.Remove($"{DateTime.Now:yyyyMMdd}_home");
 
             return Result.Ok();
         }

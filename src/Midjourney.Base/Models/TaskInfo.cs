@@ -29,6 +29,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Midjourney.Base.Data;
 using Midjourney.Base.Dto;
 using Midjourney.Base.Storage;
+using MongoDB.Driver;
 using Serilog;
 
 namespace Midjourney.Base.Models
@@ -62,6 +63,21 @@ namespace Midjourney.Base.Models
         /// Midjourney CDN 域名
         /// </summary>
         public const string MIDJOURNEY_CDN = "cdn.midjourney.com";
+
+        /// <summary>
+        /// 悠船 CDN 域名
+        /// </summary>
+        public const string YOUCHUAN_CDN = "youchuan-imagine.oss-cn-shanghai.aliyuncs.com";
+
+        /// <summary>
+        /// 悠船内网 CDN 域名
+        /// </summary>
+        public const string YOUCHUAN_CDN_INTERNAL = "youchuan-imagine.oss-cn-shanghai-internal.aliyuncs.com";
+
+        /// <summary>
+        /// 悠船 CDN 域名前缀
+        /// </summary>
+        public const string YOUCHUAN_CDN_PREFIX = "youchuan-imagine.oss-cn-shanghai";
 
         /// <summary>
         /// 版本号匹配正则表达式。
@@ -199,6 +215,12 @@ namespace Midjourney.Base.Models
         public string Description { get; set; }
 
         /// <summary>
+        /// 语言参数，如 zh 或 zh_cn 表示需要将结果翻译为中文
+        /// </summary>
+        [Column(StringLength = 20)]
+        public string Language { get; set; }
+
+        /// <summary>
         /// 自定义参数。
         /// </summary>
         public string State { get; set; }
@@ -252,6 +274,11 @@ namespace Midjourney.Base.Models
         /// </summary>
         [Column(StringLength = -1)]
         public string FailReason { get; set; }
+
+        /// <summary>
+        /// 是否已经重试 AI 审核
+        /// </summary>
+        public bool HasAIReviewRetried { get; set; }
 
         /// <summary>
         /// 是否为悠船任务
@@ -331,6 +358,11 @@ namespace Midjourney.Base.Models
         /// 任务的种子。
         /// </summary>
         public string Seed { get; set; }
+
+        /// <summary>
+        /// 种子错误信息，如果获取种子失败时记录错误原因。
+        /// </summary>
+        public string SeedError { get; set; }
 
         /// <summary>
         /// Seed 消息 ID
@@ -507,6 +539,12 @@ namespace Midjourney.Base.Models
         /// 视频帧数
         /// </summary>
         public int? FrameCount { get; set; }
+
+        /// <summary>
+        /// 视频URL。
+        /// </summary>
+        [Column(StringLength = 1024)]
+        public string VideoUrl { get; set; }
 
         /// <summary>
         /// 视频列表
@@ -686,12 +724,125 @@ namespace Midjourney.Base.Models
                 SetProperty(Constants.TASK_PROPERTY_FINAL_PROMPT, finalPrompt);
             }
 
-            UpdateUserDrawCount(true);
-
             // 最后才设置完成时间和状态
             FinishTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
             Status = TaskStatus.SUCCESS;
             Progress = "100%";
+
+            // 为IMAGINE类型任务或包含upsample按钮的任务生成图片URL数组
+            bool shouldGenerateImageUrls = false;
+            int batchSize = GetBatchSize();
+
+            // 检查是否为IMAGINE类型任务
+            if (Action == TaskAction.IMAGINE && !string.IsNullOrWhiteSpace(JobId))
+            {
+                shouldGenerateImageUrls = true;
+            }
+            // 检查buttons中是否包含upsample相关的customId
+            else if (!string.IsNullOrWhiteSpace(JobId) && Buttons?.Any(x => x.CustomId?.Contains("MJ::JOB::upsample::") == true) == true)
+            {
+                shouldGenerateImageUrls = true;
+            }
+
+            if (shouldGenerateImageUrls && (ImageUrls == null || ImageUrls.Count <= 0))
+            {
+                ImageUrls = new List<TaskInfoImageUrl>();
+                for (int i = 0; i < batchSize; i++)
+                {
+                    ImageUrls.Add(new TaskInfoImageUrl
+                    {
+                        Url = $"https://cdn.midjourney.com/{JobId}/0_{i}.png",
+                        Thumbnail = $"https://cdn.midjourney.com/{JobId}/0_{i}_640_N.webp",
+                    });
+                }
+            }
+
+            // 为VIDEO和VIDEO_EXTEND类型任务生成视频URL数组
+            if ((VideoUrls == null || VideoUrls.Count <= 0) && (Action == TaskAction.VIDEO || Action == TaskAction.VIDEO_EXTEND) && !string.IsNullOrWhiteSpace(JobId))
+            {
+                // VideoUrl直接使用现有的ImageUrl（ImageUrl本身就是视频链接）
+                VideoUrl = ImageUrl;
+
+                VideoUrls = new List<TaskInfoVideoUrl>();
+                ImageUrls = new List<TaskInfoImageUrl>(); // 同时同步到imageUrls
+
+                for (int i = 0; i < batchSize; i++)
+                {
+                    var videoUrl = $"https://cdn.midjourney.com/video/{JobId}/0_{i}.mp4";
+                    //var webpUrl = $"https://cdn.midjourney.com/{JobId}/0_{i}.webp";
+                    var thumbnailUrl = $"https://cdn.midjourney.com/{JobId}/0_{i}_640_N.webp";
+
+                    // VideoUrls和ImageUrls都存储相同的视频URL，通过相同索引对应
+                    VideoUrls.Add(new TaskInfoVideoUrl
+                    {
+                        Url = videoUrl,
+                        Thumbnail = thumbnailUrl,
+                    });
+
+                    ImageUrls.Add(new TaskInfoImageUrl
+                    {
+                        Url = videoUrl,
+                        Thumbnail = thumbnailUrl,
+                    });
+                }
+            }
+
+            try
+            {
+                // 如果 language 是 zh 或 zh_cn 且配置了翻译服务，则翻译结果
+                if ((Language == "zh" || Language == "zh_cn") && !string.IsNullOrWhiteSpace(finalPrompt)
+                    && TranslateHelper.Instance != null)
+                {
+                    var translatedPrompt = TranslateHelper.Instance.TranslateToChinese(finalPrompt);
+                    if (!string.IsNullOrWhiteSpace(translatedPrompt))
+                    {
+                        Prompt = translatedPrompt;
+                        PromptFull = translatedPrompt;
+
+                        // 更新 properties 里的 finalPrompt 为翻译后的中文
+                        SetProperty(Constants.TASK_PROPERTY_FINAL_PROMPT, translatedPrompt);
+
+                        Log.Information("DESCRIBE 任务结果已翻译为中文: TaskId={@0}, Prompt={@1}", Id,  translatedPrompt);
+                    }
+                    else
+                    {
+                        // 如果翻译返回空值，至少设置 Prompt 为原文，避免 Prompt 为空
+                        Prompt = finalPrompt;
+                        PromptFull = finalPrompt;
+                        Log.Warning("DESCRIBE 任务翻译返回空值，使用原文: TaskId={TaskId}", Id);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "处理 DESCRIBE 翻译任务失败: TaskId={TaskId}", Id);
+            }
+
+            UpdateUserDrawCount(true);
+        }
+
+        private int GetBatchSize()
+        {
+            string promptSource = PromptFull;
+
+            if (string.IsNullOrWhiteSpace(promptSource))
+            {
+                promptSource = !string.IsNullOrWhiteSpace(PromptEn) ? PromptEn : Prompt;
+            }
+
+            if (!string.IsNullOrWhiteSpace(promptSource))
+            {
+                var match = Regex.Match(promptSource, @"--bs\s+(\d+)", RegexOptions.IgnoreCase);
+                if (match.Success && int.TryParse(match.Groups[1].Value, out var batchSize))
+                {
+                    if (batchSize >= 1 && batchSize <= 4)
+                    {
+                        return batchSize;
+                    }
+                }
+            }
+
+            return 4;
         }
 
         /// <summary>
@@ -1064,6 +1215,101 @@ namespace Midjourney.Base.Models
         }
 
         /// <summary>
+        /// 转为合作商自定义链接
+        /// </summary>
+        public void TransformToPartnerUrl()
+        {
+            var setting = GlobalConfiguration.Setting;
+            if (IsPartner && !string.IsNullOrWhiteSpace(setting.LocalStorage?.PartnerCdn))
+            {
+                // 替换合作商域名
+
+                if (!string.IsNullOrWhiteSpace(VideoGenOriginImageUrl) && VideoGenOriginImageUrl.Contains(YOUCHUAN_CDN_PREFIX, StringComparison.OrdinalIgnoreCase))
+                {
+                    var uri = new Uri(VideoGenOriginImageUrl);
+                    VideoGenOriginImageUrl = $"{setting.LocalStorage.PartnerCdn}/{uri.PathAndQuery.TrimStart('/')}";
+                }
+
+                if (VideoUrls?.Count > 0)
+                {
+                    foreach (var item in VideoUrls)
+                    {
+                        if (!string.IsNullOrWhiteSpace(item.Url) && item.Url.Contains(YOUCHUAN_CDN_PREFIX, StringComparison.OrdinalIgnoreCase))
+                        {
+                            var uri = new Uri(item.Url);
+                            item.Url = $"{setting.LocalStorage.PartnerCdn}/{uri.PathAndQuery.TrimStart('/')}";
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(ImageUrl) && ImageUrl.Contains(YOUCHUAN_CDN_PREFIX, StringComparison.OrdinalIgnoreCase))
+                {
+                    var uri = new Uri(ImageUrl);
+                    ImageUrl = $"{setting.LocalStorage.PartnerCdn}/{uri.PathAndQuery.TrimStart('/')}";
+                }
+
+                if (!string.IsNullOrWhiteSpace(Url) && Url.Contains(YOUCHUAN_CDN_PREFIX, StringComparison.OrdinalIgnoreCase))
+                {
+                    var uri = new Uri(Url);
+                    Url = $"{setting.LocalStorage.PartnerCdn}/{uri.PathAndQuery.TrimStart('/')}";
+                }
+
+                if (ImageUrls?.Count > 0)
+                {
+                    foreach (var item in ImageUrls)
+                    {
+                        if (!string.IsNullOrWhiteSpace(item.Url) && item.Url.Contains(YOUCHUAN_CDN_PREFIX, StringComparison.OrdinalIgnoreCase))
+                        {
+                            var uri = new Uri(item.Url);
+                            item.Url = $"{setting.LocalStorage.PartnerCdn}/{uri.PathAndQuery.TrimStart('/')}";
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(item.Thumbnail) && item.Thumbnail.Contains(YOUCHUAN_CDN_PREFIX, StringComparison.OrdinalIgnoreCase))
+                        {
+                            var uri = new Uri(item.Thumbnail);
+                            item.Thumbnail = $"{setting.LocalStorage.PartnerCdn}/{uri.PathAndQuery.TrimStart('/')}";
+                        }
+                        else
+                        {
+                            // 清除缩略图
+                            item.Thumbnail = null;
+                        }
+                    }
+                }
+
+                if (PartnerTaskInfo?.ImgUrls?.Count > 0)
+                {
+                    foreach (var item in PartnerTaskInfo.ImgUrls)
+                    {
+                        if (!string.IsNullOrWhiteSpace(item.Url) && item.Url.Contains(YOUCHUAN_CDN_PREFIX, StringComparison.OrdinalIgnoreCase))
+                        {
+                            var uri = new Uri(item.Url);
+                            item.Url = $"{setting.LocalStorage.PartnerCdn}/{uri.PathAndQuery.TrimStart('/')}";
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(item.Webp) && item.Webp.Contains(YOUCHUAN_CDN_PREFIX, StringComparison.OrdinalIgnoreCase))
+                        {
+                            var uri = new Uri(item.Webp);
+                            item.Webp = $"{setting.LocalStorage.PartnerCdn}/{uri.PathAndQuery.TrimStart('/')}";
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(item.Thumbnail) && item.Thumbnail.Contains(YOUCHUAN_CDN_PREFIX, StringComparison.OrdinalIgnoreCase))
+                        {
+                            var uri = new Uri(item.Thumbnail);
+                            item.Thumbnail = $"{setting.LocalStorage.PartnerCdn}/{uri.PathAndQuery.TrimStart('/')}";
+                        }
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(PartnerTaskInfo.VideoGenOriginImageUrl))
+                    {
+                        var uri = new Uri(PartnerTaskInfo.VideoGenOriginImageUrl);
+                        PartnerTaskInfo.VideoGenOriginImageUrl = $"{setting.LocalStorage.PartnerCdn}/{uri.PathAndQuery.TrimStart('/')}";
+                    }
+                }
+            }
+        }
+
+        /// <summary>
         /// 转换 URL 为官方链接或合作商链接。
         /// </summary>
         /// <param name="sourceUrl"></param>
@@ -1074,16 +1320,15 @@ namespace Midjourney.Base.Models
             // 悠船
             if (IsPartner)
             {
-                var setting = GlobalConfiguration.Setting;
-                if (!string.IsNullOrWhiteSpace(setting.LocalStorage?.PartnerCdn) && !string.IsNullOrWhiteSpace(sourceUrl))
-                {
-                    // 替换域名
-                    var uri = new Uri(sourceUrl);
-                    return $"{setting.LocalStorage.PartnerCdn}/{uri.PathAndQuery.TrimStart('/')}";
-                }
-
                 if (!string.IsNullOrWhiteSpace(sourceUrl))
                 {
+                    var setting = GlobalConfiguration.Setting;
+                    if (!string.IsNullOrWhiteSpace(setting.LocalStorage?.PartnerCdn) && sourceUrl.Contains(YOUCHUAN_CDN_PREFIX, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var uri = new Uri(sourceUrl);
+                        return $"{setting.LocalStorage.PartnerCdn}/{uri.PathAndQuery.TrimStart('/')}";
+                    }
+
                     if (StorageOption == EStorageOption.Partner)
                     {
                         return sourceUrl;
@@ -1164,6 +1409,12 @@ namespace Midjourney.Base.Models
         /// </summary>
         [JsonPropertyName("url")]
         public string Url { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 缩略图 URL
+        /// </summary>
+        [JsonPropertyName("thumbnail")]
+        public string Thumbnail { get; set; }
     }
 
     /// <summary>
@@ -1175,9 +1426,10 @@ namespace Midjourney.Base.Models
         {
         }
 
-        public TaskInfoImageUrl(string url)
+        public TaskInfoImageUrl(string url, string thumbnail)
         {
             Url = url;
+            Thumbnail = thumbnail;
         }
 
         /// <summary>
@@ -1185,5 +1437,11 @@ namespace Midjourney.Base.Models
         /// </summary>
         [JsonPropertyName("url")]
         public string Url { get; set; }
+
+        /// <summary>
+        /// 缩略图 URL
+        /// </summary>
+        [JsonPropertyName("thumbnail")]
+        public string Thumbnail { get; set; }
     }
 }

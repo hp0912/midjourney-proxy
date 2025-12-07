@@ -14,7 +14,7 @@ The most powerful, complete, full-featured, completely free and open source Midj
 
 ⭐ 如果觉得项目不错，请一定帮忙点个 `Star`，万分感谢！
 
-## 👍👍 ChatGPT · Disocord · Midjourney 官方镜像站，官方 1.3 折优惠！
+## 👍👍 ChatGPT · Discord · Midjourney 官方镜像站，官方 1 折优惠！
 
 - 🍎 支持 Discord ChatGPT 所有指令！
 - 😍 多端登录，不限设备，不限网络，永不封号！
@@ -53,7 +53,8 @@ The most powerful, complete, full-featured, completely free and open source Midj
 
 - [x] 支持 Discord 绘图。
 - [x] 支持悠船绘图。
-- [x] 支持官网 Midjourney 绘图（内测中）。
+- [x] 支持官网 Midjourney 绘图。
+- [x] 支持分布式部署。
 - [x] 增加在线升级功能。
 - [x] 增加在线重启功能。
 - [x] 支持弹性部署，负载均衡，支持 Consul 配置中心。
@@ -198,6 +199,10 @@ wget -O docker-upgrade.sh https://raw.githubusercontent.com/trueai-org/midjourne
 
 # 2.更新升级（以后升级只需要执行此脚本即可）
 sh docker-upgrade.sh
+
+# 3. Docker 环境变量
+# 3.1 节点最大任务并行数：-e CONCURRENT=10，默认不限制
+# 3.2 配置宿主私网 IP：-e HOST_IP=10.0.0.1，默认不配置
 ```
 
 ```bash
@@ -346,8 +351,24 @@ curl -o linux_install.sh https://raw.githubusercontent.com/trueai-org/midjourney
 
 ### Redis 配置
 
+`推荐开启 Redis`
+
 - 开启 Redis 支持分布式部署。
-- 依赖 Redis 可以自动过官网 CloudFlare 验证。
+- 开启 Redis 支持实时调整队列数、并发数。
+- 开启 Redis 支持重启继续任务。
+- 开启 Redis 可以自动过官网 CloudFlare 验证。
+
+> Docker Redis 一键启动脚本参考：
+
+```bash
+docker run --name redis --restart always -p 6379:6379 -v /root/mjopen/redis:/data -d redis:6.2.11 redis-server --appendonly yes --requirepass "123456"
+```
+
+> Docker Redis 连接字符串参考：
+
+```bash
+172.17.1.1:6379,password=123456,defaultDatabase=1,prefix=mjopen:
+```
 
 ### MongoDB 配置
 

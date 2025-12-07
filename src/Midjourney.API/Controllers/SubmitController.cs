@@ -40,7 +40,7 @@ namespace Midjourney.API.Controllers
     [Route("mj-relax/mj/submit")]
     public class SubmitController : ControllerBase
     {
-        private readonly ITranslateService _translateService;
+        //private readonly ITranslateService _translateService;
         private readonly ITaskStoreService _taskStoreService;
 
         private readonly DiscordHelper _discordHelper;
@@ -64,7 +64,7 @@ namespace Midjourney.API.Controllers
         private readonly EStorageOption? _storageOption;
 
         public SubmitController(
-            ITranslateService translateService,
+            //ITranslateService translateService,
             ITaskStoreService taskStoreService,
             ITaskService taskService,
             ILogger<SubmitController> logger,
@@ -75,7 +75,7 @@ namespace Midjourney.API.Controllers
             IMemoryCache memoryCache)
         {
             _memoryCache = memoryCache;
-            _translateService = translateService;
+            //_translateService = translateService;
             _taskStoreService = taskStoreService;
             _setting = GlobalConfiguration.Setting;
             _taskService = taskService;
@@ -111,9 +111,11 @@ namespace Midjourney.API.Controllers
                     case "1":
                         _storageOption = EStorageOption.Official;
                         break;
+
                     case "2":
                         _storageOption = EStorageOption.Partner;
                         break;
+
                     default:
                         break;
                 }
@@ -138,7 +140,7 @@ namespace Midjourney.API.Controllers
         /// <param name="imagineDTO">提交Imagine任务的DTO</param>
         /// <returns>提交结果</returns>
         [HttpPost("imagine")]
-        public ActionResult<SubmitResultVO> Imagine([FromBody] SubmitImagineDTO imagineDTO)
+        public async Task<ActionResult<SubmitResultVO>> Imagine([FromBody] SubmitImagineDTO imagineDTO)
         {
             try
             {
@@ -158,6 +160,7 @@ namespace Midjourney.API.Controllers
 
                 prompt = prompt.Trim();
                 var task = NewTask(imagineDTO);
+
                 task.Action = TaskAction.IMAGINE;
                 task.Prompt = prompt;
                 task.BotType = GetBotType(imagineDTO.BotType);
@@ -171,9 +174,10 @@ namespace Midjourney.API.Controllers
                 }
 
                 string promptEn = TranslatePrompt(prompt, task.RealBotType ?? task.BotType);
+
                 try
                 {
-                    _taskService.CheckBanned(promptEn);
+                    promptEn = _taskService.CheckBanned(promptEn);
                 }
                 catch (BannedPromptException e)
                 {
@@ -198,7 +202,7 @@ namespace Midjourney.API.Controllers
 
                 NewTaskDoFilter(task, imagineDTO.AccountFilter);
 
-                var data = _taskService.SubmitImagine(task, dataUrls);
+                var data = await _taskService.SubmitImagine(task, dataUrls);
                 return Ok(data);
             }
             catch (LogicException lex)
@@ -356,7 +360,7 @@ namespace Midjourney.API.Controllers
         }
 
         /// <summary>
-        /// 任务变化（简单操作）
+        /// 任务变化（简单操作） - 仅用于 Discord 交互（即将废弃，请使用 action 接口）
         /// </summary>
         /// <param name="changeDTO">提交变化任务的DTO</param>
         /// <returns>提交结果</returns>
@@ -439,7 +443,7 @@ namespace Midjourney.API.Controllers
         /// <param name="describeDTO">提交Describe任务的DTO</param>
         /// <returns>提交结果</returns>
         [HttpPost("describe")]
-        public ActionResult<SubmitResultVO> Describe([FromBody] SubmitDescribeDTO describeDTO)
+        public async Task<ActionResult<SubmitResultVO>> Describe([FromBody] SubmitDescribeDTO describeDTO)
         {
             if (string.IsNullOrWhiteSpace(describeDTO.Base64)
                 && string.IsNullOrWhiteSpace(describeDTO.Link))
@@ -488,13 +492,15 @@ namespace Midjourney.API.Controllers
 
             task.BotType = GetBotType(describeDTO.BotType);
             task.Action = TaskAction.DESCRIBE;
+            task.Language = describeDTO.Language;
 
             string taskFileName = $"{task.Id}.{FileFetchHelper.GuessFileSuffix(dataUrl.MimeType, dataUrl.Url)}";
             task.Description = $"/describe {taskFileName}";
 
             NewTaskDoFilter(task, describeDTO.AccountFilter);
 
-            return Ok(_taskService.SubmitDescribe(task, dataUrl));
+            var data = await _taskService.SubmitDescribe(task, dataUrl);
+            return Ok(data);
         }
 
         /// <summary>
@@ -503,7 +509,7 @@ namespace Midjourney.API.Controllers
         /// <param name="dto"></param>
         /// <returns></returns>
         [HttpPost("shorten")]
-        public ActionResult<SubmitResultVO> Shorten([FromBody] SubmitImagineDTO dto)
+        public async Task<ActionResult<SubmitResultVO>> Shorten([FromBody] SubmitImagineDTO dto)
         {
             var task = NewTask(dto);
 
@@ -516,7 +522,7 @@ namespace Midjourney.API.Controllers
             var promptEn = TranslatePrompt(prompt, task.RealBotType ?? task.BotType);
             try
             {
-                _taskService.CheckBanned(promptEn);
+                promptEn = _taskService.CheckBanned(promptEn);
             }
             catch (BannedPromptException e)
             {
@@ -530,7 +536,9 @@ namespace Midjourney.API.Controllers
 
             NewTaskDoFilter(task, dto.AccountFilter);
 
-            return Ok(_taskService.ShortenAsync(task));
+            var data = await _taskService.ShortenAsync(task);
+
+            return Ok(data);
         }
 
         /// <summary>
@@ -539,7 +547,7 @@ namespace Midjourney.API.Controllers
         /// <param name="blendDTO">提交Blend任务的DTO</param>
         /// <returns>提交结果</returns>
         [HttpPost("blend")]
-        public ActionResult<SubmitResultVO> Blend([FromBody] SubmitBlendDTO blendDTO)
+        public async Task<ActionResult<SubmitResultVO>> Blend([FromBody] SubmitBlendDTO blendDTO)
         {
             List<string> base64Array = blendDTO.Base64Array;
             if (base64Array == null || base64Array.Count < 2 || base64Array.Count > 5)
@@ -578,7 +586,9 @@ namespace Midjourney.API.Controllers
 
             NewTaskDoFilter(task, blendDTO.AccountFilter);
 
-            return Ok(_taskService.SubmitBlend(task, dataUrlList, blendDTO.Dimensions.Value));
+            var data = await _taskService.SubmitBlend(task, dataUrlList, blendDTO.Dimensions.Value);
+
+            return Ok(data);
         }
 
         /// <summary>
@@ -588,7 +598,7 @@ namespace Midjourney.API.Controllers
         /// <param name="actionDTO"></param>
         /// <returns></returns>
         [HttpPost("action")]
-        public ActionResult<SubmitResultVO> Action([FromBody] SubmitActionDTO actionDTO)
+        public async Task<ActionResult<SubmitResultVO>> Action([FromBody] SubmitActionDTO actionDTO)
         {
             if (string.IsNullOrWhiteSpace(actionDTO.TaskId) || string.IsNullOrWhiteSpace(actionDTO.CustomId))
             {
@@ -741,7 +751,9 @@ namespace Midjourney.API.Controllers
                 task.Action = TaskAction.ACTION;
             }
 
-            return Ok(_taskService.SubmitAction(task, actionDTO));
+            var data = await _taskService.SubmitAction(task, actionDTO);
+
+            return Ok(data);
         }
 
         /// <summary>
@@ -750,7 +762,7 @@ namespace Midjourney.API.Controllers
         /// <param name="actionDTO"></param>
         /// <returns></returns>
         [HttpPost("modal")]
-        public ActionResult<SubmitResultVO> Modal([FromBody] SubmitModalDTO actionDTO)
+        public async Task<ActionResult<SubmitResultVO>> Modal([FromBody] SubmitModalDTO actionDTO)
         {
             if (string.IsNullOrWhiteSpace(actionDTO.TaskId))
             {
@@ -791,7 +803,7 @@ namespace Midjourney.API.Controllers
             var promptEn = TranslatePrompt(prompt, task.RealBotType ?? task.BotType);
             try
             {
-                _taskService.CheckBanned(promptEn);
+                promptEn = _taskService.CheckBanned(promptEn);
             }
             catch (BannedPromptException e)
             {
@@ -819,7 +831,9 @@ namespace Midjourney.API.Controllers
             // 提交 modal 指示为 true
             task.RemixAutoSubmit = true;
 
-            return Ok(_taskService.SubmitModal(task, actionDTO, dataUrl));
+            var data = await _taskService.SubmitModal(task, actionDTO, dataUrl);
+
+            return Ok(data);
         }
 
         /// <summary>
@@ -830,7 +844,7 @@ namespace Midjourney.API.Controllers
         /// <returns></returns>
         [HttpPost("edit")]
         [HttpPost("edits")]
-        public ActionResult<SubmitResultVO> Edits([FromBody] SubmitEditsDTO editsDTO)
+        public async Task<ActionResult<SubmitResultVO>> Edits([FromBody] SubmitEditsDTO editsDTO)
         {
             if (string.IsNullOrWhiteSpace(editsDTO.Image) || string.IsNullOrWhiteSpace(editsDTO.Prompt))
             {
@@ -873,7 +887,7 @@ namespace Midjourney.API.Controllers
 
             try
             {
-                _taskService.CheckBanned(promptEn);
+                promptEn = _taskService.CheckBanned(promptEn);
             }
             catch (BannedPromptException e)
             {
@@ -890,7 +904,8 @@ namespace Midjourney.API.Controllers
 
             NewTaskDoFilter(task, editsDTO.AccountFilter);
 
-            return Ok(_taskService.SubmitEdit(task, dataUrl));
+            var data = await _taskService.SubmitEdit(task, dataUrl);
+            return Ok(data);
         }
 
         /// <summary>
@@ -899,7 +914,7 @@ namespace Midjourney.API.Controllers
         /// <param name="editsDTO"></param>
         /// <returns></returns>
         [HttpPost("retexture")]
-        public ActionResult<SubmitResultVO> Retexture([FromBody] SubmitEditsDTO editsDTO)
+        public async Task<ActionResult<SubmitResultVO>> Retexture([FromBody] SubmitEditsDTO editsDTO)
         {
             if (string.IsNullOrWhiteSpace(editsDTO.Image) || string.IsNullOrWhiteSpace(editsDTO.Prompt))
             {
@@ -942,7 +957,7 @@ namespace Midjourney.API.Controllers
 
             try
             {
-                _taskService.CheckBanned(promptEn);
+                promptEn = _taskService.CheckBanned(promptEn);
             }
             catch (BannedPromptException e)
             {
@@ -959,7 +974,8 @@ namespace Midjourney.API.Controllers
 
             NewTaskDoFilter(task, editsDTO.AccountFilter);
 
-            return Ok(_taskService.SubmitRetexture(task, dataUrl));
+            var data = await _taskService.SubmitRetexture(task, dataUrl);
+            return Ok(data);
         }
 
         /// <summary>
@@ -968,7 +984,7 @@ namespace Midjourney.API.Controllers
         /// <param name="videoDTO"></param>
         /// <returns></returns>
         [HttpPost("video")]
-        public ActionResult<SubmitResultVO> Video([FromBody] SubmitVideoDTO videoDTO)
+        public async Task<ActionResult<SubmitResultVO>> Video([FromBody] SubmitVideoDTO videoDTO)
         {
             var setting = GlobalConfiguration.Setting;
             if (!setting.EnableVideo)
@@ -1006,7 +1022,7 @@ namespace Midjourney.API.Controllers
 
             try
             {
-                _taskService.CheckBanned(promptEn);
+                promptEn = _taskService.CheckBanned(promptEn);
             }
             catch (BannedPromptException e)
             {
@@ -1055,7 +1071,6 @@ namespace Midjourney.API.Controllers
                     return Ok(SubmitResultVO.Fail(ReturnCode.VALIDATION_ERROR, "关联任务状态错误"));
                 }
 
-
                 task.InstanceId = targetTask.InstanceId;
                 task.ParentId = targetTask.Id;
                 task.BotType = targetTask.BotType;
@@ -1067,7 +1082,9 @@ namespace Midjourney.API.Controllers
             task.Prompt = videoDTO.Prompt;
             task.PromptEn = promptEn;
 
-            return Ok(_taskService.SubmitVideo(task, targetTask, startUrl, endUrl, videoDTO));
+            var data = await _taskService.SubmitVideo(task, targetTask, startUrl, endUrl, videoDTO);
+
+            return Ok(data);
         }
 
         /// <summary>
@@ -1354,9 +1371,10 @@ namespace Midjourney.API.Controllers
         /// <returns>翻译后的提示词</returns>
         private string TranslatePrompt(string prompt, EBotType botType)
         {
+            var translateService = TranslateHelper.Instance;
             var setting = GlobalConfiguration.Setting;
-
-            if (_setting.TranslateWay == TranslateWay.NULL || string.IsNullOrWhiteSpace(prompt) || !_translateService.ContainsChinese(prompt))
+            if (translateService == null ||
+                _setting.TranslateWay == TranslateWay.NULL || string.IsNullOrWhiteSpace(prompt) || !translateService.ContainsChinese(prompt))
             {
                 return prompt;
             }
@@ -1396,7 +1414,7 @@ namespace Midjourney.API.Controllers
             }
             if (!string.IsNullOrWhiteSpace(text))
             {
-                text = _translateService.TranslateToEnglish(text).Trim();
+                text = translateService.TranslateToEnglish(text).Trim();
             }
             if (!string.IsNullOrWhiteSpace(paramStr))
             {
@@ -1406,7 +1424,7 @@ namespace Midjourney.API.Controllers
                 if (paramNomatcher.Success)
                 {
                     string paramNoStr = paramNomatcher.Groups[1].Value.Trim();
-                    string paramNoStrEn = _translateService.TranslateToEnglish(paramNoStr).Trim();
+                    string paramNoStrEn = translateService.TranslateToEnglish(paramNoStr).Trim();
 
                     // 提取 --no 之前的参数
                     paramStr = paramStr.Substring(0, paramNomatcher.Index);
