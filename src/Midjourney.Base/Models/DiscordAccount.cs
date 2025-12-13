@@ -85,6 +85,36 @@ namespace Midjourney.Base.Models
         public string CacheKey => $"account_cache:{Id}";
 
         /// <summary>
+        /// 快速可用计数缓存 key - 永久
+        /// </summary>
+        [LiteDB.BsonIgnore]
+        [MongoDB.Bson.Serialization.Attributes.BsonIgnore]
+        [Newtonsoft.Json.JsonIgnore]
+        [System.Text.Json.Serialization.JsonIgnore]
+        [Column(IsIgnore = true)]
+        public string FastAvailableCountKey => $"account_fast_available_count:{Id}";
+
+        /// <summary>
+        /// 悠船慢速今日计数 key
+        /// </summary>
+        [LiteDB.BsonIgnore]
+        [MongoDB.Bson.Serialization.Attributes.BsonIgnore]
+        [Newtonsoft.Json.JsonIgnore]
+        [System.Text.Json.Serialization.JsonIgnore]
+        [Column(IsIgnore = true)]
+        public string YouchuanRelaxCountKey => $"account_youchuan_relax_count:{DateTime.Now:yyyyMMdd}:{Id}";
+
+        /// <summary>
+        /// 悠船图生文今日计数 key 
+        /// </summary>
+        [LiteDB.BsonIgnore]
+        [MongoDB.Bson.Serialization.Attributes.BsonIgnore]
+        [Newtonsoft.Json.JsonIgnore]
+        [System.Text.Json.Serialization.JsonIgnore]
+        [Column(IsIgnore = true)]
+        public string YouchuanDescribeCountKey => $"account_youchuan_describe_count:{DateTime.Now:yyyyMMdd}:{Id}";
+
+        /// <summary>
         /// 添加一个事件用于通知去清理缓存
         /// </summary>
         public event Action ClearCacheEvent;
@@ -171,15 +201,15 @@ namespace Midjourney.Base.Models
         /// </summary>
         public bool? EnableNiji { get; set; }
 
-        ///// <summary>
-        ///// 启用快速模式用完自动切换到慢速模式（仅用于 discord 账号切换到慢速模式）
-        ///// </summary>
-        //public bool? EnableFastToRelax { get; set; }
+        /// <summary>
+        /// 启用快速模式用完自动切换到慢速模式（仅用于 discord 账号切换到慢速模式）（废弃，请使用自动设置慢速）
+        /// </summary>
+        public bool? EnableFastToRelax { get; set; }
 
-        ///// <summary>
-        ///// 启用时，当有快速时长时，自动切换到快速模式（废弃）
-        ///// </summary>
-        //public bool? EnableRelaxToFast { get; set; }
+        /// <summary>
+        /// 启用时，当有快速时长时，自动切换到快速模式（废弃）
+        /// </summary>
+        public bool? EnableRelaxToFast { get; set; }
 
         /// <summary>
         /// 表示快速模式是否已经用完了
@@ -545,10 +575,10 @@ namespace Midjourney.Base.Models
         /// </summary>
         public int DayRelaxDrawLimit { get; set; } = -1;
 
-        ///// <summary>
-        ///// 当日已绘图次数（废弃）
-        ///// </summary>
-        //public int DayDrawCount { get; set; } = 0;
+        /// <summary>
+        /// 当日已绘图次数（废弃）
+        /// </summary>
+        public int DayDrawCount { get; set; } = 0;
 
         /// <summary>
         /// 今日慢速绘图总数（包含失败，不包含放大）
@@ -636,6 +666,14 @@ namespace Midjourney.Base.Models
         public bool IsYouChuan { get; set; }
 
         /// <summary>
+        /// 悠船开启优先慢速功能
+        /// 当有 relax 时，所有 任务（非视频/图生文）强制 relax
+        /// relax 用完后，使用快速。
+        /// 非固定模式，优先慢速的话，即，有慢速则使用慢速，有快速则使用快速。
+        /// </summary>
+        public bool YouChuanEnablePreferRelax { get; set; }
+
+        /// <summary>
         /// 悠船快速时长剩余，单位：秒（total - used）
         /// 剩余时间 > 60s/180s 时，表示允许绘图
         /// </summary>
@@ -659,6 +697,13 @@ namespace Midjourney.Base.Models
         /// </summary>
         [BsonDateTimeOptions(Kind = DateTimeKind.Local)]
         public DateTime? YouChuanRelaxedReset { get; set; }
+
+        /// <summary>
+        /// 悠船 picread 每日 200 上限，重置时间点（yyyy-MM-dd），当当天触发 picread 限制时，重置为第二天
+        /// 当时间为 null 或小于等于当天时间时，表示允许 picread
+        /// picread 不消耗 GPU
+        /// </summary>
+        public DateTime? YouChuanPicreadReset { get; set; }
 
         /// <summary>
         /// 验证速度模式，是否允许继续绘图，并确定速度模式
@@ -1418,6 +1463,7 @@ namespace Midjourney.Base.Models
                 LoginAccount = configAccount.LoginAccount,
                 LoginPassword = configAccount.LoginPassword,
                 Login2fa = configAccount.Login2fa,
+                YouChuanEnablePreferRelax = configAccount.YouChuanEnablePreferRelax,
                 IsYouChuan = configAccount.IsYouChuan,
                 IsOfficial = configAccount.IsOfficial,
                 OfficialEnablePersonalize = configAccount.OfficialEnablePersonalize,

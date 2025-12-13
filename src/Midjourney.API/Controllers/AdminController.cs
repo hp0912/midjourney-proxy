@@ -33,6 +33,7 @@ using LiteDB;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
+using Midjourney.Base.Options;
 using Midjourney.Infrastructure.LoadBalancer;
 using Midjourney.Infrastructure.Services;
 using Midjourney.License;
@@ -142,7 +143,7 @@ namespace Midjourney.API.Controllers
             // 每个IP每天只能注册一个账号
             var ip = _workContext.GetIp();
             var key = $"register:{ip}";
-            if (_memoryCache.TryGetValue(key, out _))
+            if (AdaptiveCache.Exists(key))
             {
                 throw new LogicException("注册太频繁");
             }
@@ -177,7 +178,7 @@ namespace Midjourney.API.Controllers
                    user.Email);
 
             // 设置缓存
-            _memoryCache.Set(key, true, TimeSpan.FromDays(1));
+            AdaptiveCache.Set(key, true, TimeSpan.FromDays(1));
 
             return Result.Ok();
         }
@@ -887,7 +888,7 @@ namespace Midjourney.API.Controllers
             var sponsorCount = 0;
             if (setting.EnableAccountSponsor && user.Role != EUserRole.ADMIN)
             {
-                if (_memoryCache.TryGetValue(limitKey, out sponsorCount) && sponsorCount > 10)
+                if (AdaptiveCache.TryGetValue(limitKey, out sponsorCount) && sponsorCount > 10)
                 {
                     Result.Fail("每天最多只能赞助 10 个账号");
                 }
@@ -942,7 +943,7 @@ namespace Midjourney.API.Controllers
             {
                 sponsorCount++;
 
-                _memoryCache.Set(limitKey, sponsorCount, TimeSpan.FromDays(1));
+                AdaptiveCache.Set(limitKey, sponsorCount, TimeSpan.FromDays(1));
             }
 
             return Result.Ok();
@@ -1152,8 +1153,9 @@ namespace Midjourney.API.Controllers
             {
                 var inc = _loadBalancer.GetDiscordInstance(item.ChannelId);
 
-                item.RunningCount = inc?.GetRunningTaskCount ?? 0;
-                item.QueueCount = inc?.GetQueueTaskCount ?? 0;
+                //item.RunningCount = inc?.GetRunningTaskCount ?? 0;
+                //item.QueueCount = inc?.GetQueueTaskCount ?? 0;
+
                 item.Running = inc?.IsAlive ?? false;
 
                 if (user == null || (user.Role != EUserRole.ADMIN && user.Id != item.SponsorUserId))
@@ -2258,6 +2260,27 @@ namespace Midjourney.API.Controllers
         }
 
         /// <summary>
+        /// 从 Consul 加载配置
+        /// </summary>
+        /// <returns></returns>
+        [HttpPost("load-consul-setting")]
+        public async Task<Result<Setting>> LoadConsulSetting([FromBody] ConsulOptions consulOptions)
+        {
+            if (_isAnonymous)
+            {
+                return Result.Fail<Setting>("演示模式，禁止操作");
+            }
+
+            var consulSetting = await SettingHelper.LoadFromConsulAsync(consulOptions);
+            if (consulSetting == null)
+            {
+                return Result.Fail<Setting>("从 Consul 加载配置失败，请检查 Consul 地址/服务名称是否正确");
+            }
+
+            return Result.Ok(consulSetting);
+        }
+
+        /// <summary>
         /// 编辑系统配置
         /// </summary>
         /// <param name="setting"></param>
@@ -2292,13 +2315,11 @@ namespace Midjourney.API.Controllers
                 {
                     return Result.Fail("授权验证失败，请检查授权码是否正确，如果没有授权码，请输入默认授权码：trueai.org");
                 }
-
                 setting.PrivateFeatures = res.Features ?? [];
             }
             catch (Exception ex)
             {
                 Log.Error(ex, "授权验证失败");
-
                 return Result.Fail("授权验证失败，请检查授权码是否正确，如果没有授权码，请输入默认授权码：trueai.org");
             }
 
@@ -2309,8 +2330,7 @@ namespace Midjourney.API.Controllers
                 {
                     return Result.Fail("购买授权后，才允许使用 Consul 功能");
                 }
-
-                var success = await SettingDb.Instance.IsConsulAvailableAsync(setting);
+                var success = await SettingHelper.Instance.IsConsulAvailableAsync(setting);
                 if (!success)
                 {
                     return Result.Fail("Consul 连接失败，请检查 Consul 地址/服务名称是否正确");
@@ -2318,12 +2338,11 @@ namespace Midjourney.API.Controllers
             }
 
             // 如果启用了 redis 则验证
-            CSRedisClient csredis = null;
             if (setting.IsValidRedis)
             {
                 try
                 {
-                    csredis = new CSRedisClient(setting.RedisConnectionString);
+                    var csredis = new CSRedisClient(setting.RedisConnectionString);
                     if (!csredis.Ping())
                     {
                         return Result.Fail("Redis 连接失败，请检查连接字符串是否正确");
@@ -2335,8 +2354,6 @@ namespace Midjourney.API.Controllers
                     return Result.Fail("Redis 连接失败，请检查连接字符串是否正确");
                 }
             }
-            AdaptiveLock.Initialization(csredis);
-            AdaptiveCache.Initialization(csredis);
 
             // 如果启用了风控验证
             if (setting.EnableRiskControlAutoCaptcha)
@@ -2347,36 +2364,25 @@ namespace Midjourney.API.Controllers
                 }
             }
 
-            // 翻译服务
-            if (setting.TranslateWay == TranslateWay.GPT
-                && !string.IsNullOrWhiteSpace(setting.Openai?.GptApiKey))
-            {
-                var gptTranslate = new GPTTranslateService();
-                TranslateHelper.Initialize(gptTranslate);
-            }
-            else if (setting.TranslateWay == TranslateWay.BAIDU
-                && !string.IsNullOrWhiteSpace(setting.BaiduTranslate?.AppSecret))
-            {
-                var baiduTranslate = new BaiduTranslateService();
-                TranslateHelper.Initialize(baiduTranslate);
-            }
-            else
-            {
-                TranslateHelper.Initialize(null);
-            }
-
             setting.Id = Constants.DEFAULT_SETTING_ID;
 
-            await SettingDb.Instance.SaveAsync(setting);
+            await SettingHelper.Instance.SaveAsync(setting);
 
-            // 日志级别
-            Program.SetLogLevel(setting.LogEventLevel);
-
-            // 存储服务
-            StorageHelper.Configure();
+            // 应用新配置
+            SettingHelper.Instance.ApplySettings();
 
             // 首页缓存
             _memoryCache.Remove($"{DateTime.Now:yyyyMMdd}_home");
+
+            if (GlobalConfiguration.Setting.IsValidRedis)
+            {
+                // 通知所有节点
+                var notification = new RedisNotification
+                {
+                    Type = ENotificationType.SettingChanged,
+                };
+                RedisHelper.Publish(RedisHelper.Prefix + Constants.REDIS_NOTIFY_CHANNEL, notification.ToJson());
+            }
 
             return Result.Ok();
         }
@@ -2397,6 +2403,16 @@ namespace Midjourney.API.Controllers
             if (upgradeInfo.HasUpdate)
             {
                 await _upgradeService.StartDownloadAsync();
+            }
+
+            if (GlobalConfiguration.Setting.IsValidRedis)
+            {
+                // 通知所有节点
+                var notification = new RedisNotification
+                {
+                    Type = ENotificationType.CheckUpdate,
+                };
+                RedisHelper.Publish(RedisHelper.Prefix + Constants.REDIS_NOTIFY_CHANNEL, notification.ToJson());
             }
 
             return Result.Ok(upgradeInfo);
@@ -2500,7 +2516,7 @@ namespace Midjourney.API.Controllers
         /// </summary>
         /// <returns></returns>
         [HttpPost("restart")]
-        public Result Restart()
+        public Result Restart([FromQuery] bool all = false)
         {
             try
             {
@@ -2511,6 +2527,20 @@ namespace Midjourney.API.Controllers
 
                 // 记录重启日志
                 Log.Information("系统重启请求，操作者IP: {IP}", _workContext.GetIp());
+
+                // 重启所有节点
+                if (all)
+                {
+                    if (GlobalConfiguration.Setting.IsValidRedis)
+                    {
+                        // 通知所有节点
+                        var notification = new RedisNotification
+                        {
+                            Type = ENotificationType.Restart,
+                        };
+                        RedisHelper.Publish(RedisHelper.Prefix + Constants.REDIS_NOTIFY_CHANNEL, notification.ToJson());
+                    }
+                }
 
                 // 异步执行重启，避免阻塞当前请求
                 Task.Run(async () =>
