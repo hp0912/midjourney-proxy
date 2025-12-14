@@ -34,6 +34,12 @@ namespace Midjourney.Base.Models
     public class Setting : DomainObject
     {
         /// <summary>
+        /// 绘图完成是否填充官方 cdn 地址, 默认: false
+        /// 如果是 true, 则绘图完成时对 imageUrls 和 videoUrls 填充 cdn.midjourney.com 的官方 cdn 地址
+        /// </summary>
+        public bool EnableFillOfficialCdn { get; set; } = false;
+
+        /// <summary>
         /// 日志级别
         /// </summary>
         public LogEventLevel LogEventLevel { get; set; } = LogEventLevel.Information;
@@ -206,6 +212,11 @@ namespace Midjourney.Base.Models
         /// 启用更新检查
         /// </summary>
         public bool EnableUpdateCheck { get; set; } = true;
+
+        /// <summary>
+        /// 升级包来源
+        /// </summary>
+        public UpgradePackageSource UpgradePackageSource { get; set; } = UpgradePackageSource.GITHUB;
 
         /// <summary>
         /// 检查升级信息
