@@ -91,6 +91,8 @@ namespace Midjourney.API
         {
             try
             {
+
+
                 _applicationLifetime.ApplicationStarted.Register(async () =>
                 {
                     var setting = GlobalConfiguration.Setting;
@@ -101,63 +103,7 @@ namespace Midjourney.API
                         // 启用版本对比更新检查，启用时以注册中心的服务版本为准，如果版本过低则执行更新检查，然后退出应用程序
                         if (setting.ConsulOptions.EnableVersionCheck)
                         {
-                            try
-                            {
-                                var currentVersion = GlobalConfiguration.Version;
-                                var consulVersion = await _consulService.GetCurrentVersionAsync();
-                                if (!string.IsNullOrWhiteSpace(consulVersion) && !string.IsNullOrWhiteSpace(consulVersion) && currentVersion != consulVersion)
-                                {
-                                    var exeVer = new Version(currentVersion.TrimStart('v'));
-                                    var conVer = new Version(consulVersion.TrimStart('v'));
-                                    if (exeVer < conVer)
-                                    {
-                                        _logger.Information("注册中心检测到新版本，当前版本: {@0}，注册中心版本: {@1}，开始更新检查...", currentVersion, consulVersion);
-
-                                        // 检查更新，当有可用更新时
-                                        var downloding = await UpgradeCheck();
-                                        if (downloding)
-                                        {
-                                            // 最多等待 5 分钟，获取下载状态
-                                            var downlodingTask = new Task(() =>
-                                            {
-                                                var sw = new Stopwatch();
-                                                sw.Start();
-                                                while (sw.Elapsed.TotalMinutes < 5)
-                                                {
-                                                    var status = _upgradeService.GetUpgradeStatus();
-                                                    if (status.Status == UpgradeStatus.ReadyToRestart)
-                                                    {
-                                                        break;
-                                                    }
-                                                    Thread.Sleep(1000);
-                                                }
-                                            });
-                                            downlodingTask.Start();
-                                            downlodingTask.Wait();
-
-                                            // 再次获取状态
-                                            var finalStatus = _upgradeService.GetUpgradeStatus();
-                                            if (finalStatus.Status == UpgradeStatus.ReadyToRestart)
-                                            {
-                                                _logger.Information("注册中心版本更新检查完成，应用程序即将退出以完成更新。");
-
-                                                // 使用非 0 退出码，表示需要重启应用程序
-                                                Environment.Exit(101);
-
-                                                return;
-                                            }
-                                            else
-                                            {
-                                                _logger.Warning("注册中心版本更新检查完成，但更新未能成功完成，状态：{@0}，请手动检查更新。", finalStatus.Status);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.Error(ex, "Consul 版本对比更新检查执行失败");
-                            }
+                            await ConsulVersionCheck();
                         }
                     }
                     else
@@ -196,151 +142,8 @@ namespace Midjourney.API
                     DbHelper.Instance.IndexInit();
 
                     // 迁移 account user domain banded
-                    // 是否开启 LiteDB 自动迁移
-                    if (setting.DatabaseType != DatabaseType.LiteDB && setting.DatabaseType != DatabaseType.MongoDB && setting.IsAutoMigrate)
-                    {
-                        try
-                        {
-                            // account 迁移
-                            var liteAccountIds = LiteDBHelper.AccountStore.GetAllIds();
-                            var accountStore = DbHelper.Instance.AccountStore;
-                            var mongoAccountIds = accountStore.GetAllIds();
-                            var accountIds = liteAccountIds.Except(mongoAccountIds).ToList();
-                            if (accountIds.Count > 0)
-                            {
-                                var liteAccounts = LiteDBHelper.AccountStore.GetAll();
-                                foreach (var id in accountIds)
-                                {
-                                    var model = liteAccounts.FirstOrDefault(c => c.Id == id);
-                                    if (model != null)
-                                    {
-                                        accountStore.Add(model);
-                                    }
-                                }
-                            }
-
-                            // user 迁移
-                            var liteUserIds = LiteDBHelper.UserStore.GetAllIds();
-                            var userStore = DbHelper.Instance.UserStore;
-                            var mongoUserIds = userStore.GetAllIds();
-                            var userIds = liteUserIds.Except(mongoUserIds).ToList();
-                            if (userIds.Count > 0)
-                            {
-                                var liteUsers = LiteDBHelper.UserStore.GetAll();
-                                foreach (var id in userIds)
-                                {
-                                    var model = liteUsers.FirstOrDefault(c => c.Id == id);
-                                    if (model != null)
-                                    {
-                                        userStore.Add(model);
-                                    }
-                                }
-                            }
-
-                            // domain 迁移
-                            var liteDomainIds = LiteDBHelper.DomainStore.GetAllIds();
-                            var domainStore = DbHelper.Instance.DomainStore;
-                            var mongoDomainIds = domainStore.GetAllIds();
-                            var domainIds = liteDomainIds.Except(mongoDomainIds).ToList();
-                            if (domainIds.Count > 0)
-                            {
-                                var liteDomains = LiteDBHelper.DomainStore.GetAll();
-                                foreach (var id in domainIds)
-                                {
-                                    var model = liteDomains.FirstOrDefault(c => c.Id == id);
-                                    if (model != null)
-                                    {
-                                        domainStore.Add(model);
-                                    }
-                                }
-                            }
-
-                            // banded 迁移
-                            var liteBannedIds = LiteDBHelper.BannedWordStore.GetAllIds();
-                            var bannedStore = DbHelper.Instance.BannedWordStore;
-                            var mongoBannedIds = bannedStore.GetAllIds();
-                            var bannedIds = liteBannedIds.Except(mongoBannedIds).ToList();
-                            if (bannedIds.Count > 0)
-                            {
-                                var liteBanneds = LiteDBHelper.BannedWordStore.GetAll();
-                                foreach (var id in bannedIds)
-                                {
-                                    var model = liteBanneds.FirstOrDefault(c => c.Id == id);
-                                    if (model != null)
-                                    {
-                                        bannedStore.Add(model);
-                                    }
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.Error(ex, "LiteDB 数据迁移基本信息异常");
-                        }
-
-                        // 迁移 task
-                        try
-                        {
-                            _ = Task.Run(async () =>
-                            {
-                                try
-                                {
-                                    await AdaptiveLock.ExecuteWithLock("TaskInfoAutoMigrate", TimeSpan.FromSeconds(10), () =>
-                                    {
-                                        // 判断最后一条是否存在
-                                        var success = 0;
-                                        var last = LiteDBHelper.TaskStore.GetCollection().Query().OrderByDescending(c => c.SubmitTime).FirstOrDefault();
-                                        if (last != null)
-                                        {
-                                            var taskStore = DbHelper.Instance.TaskStore;
-
-                                            var lastModel = taskStore.Single(c => c.Id == last.Id);
-                                            if (lastModel == null)
-                                            {
-                                                // 迁移数据
-                                                var taskIds = LiteDBHelper.TaskStore.GetCollection().Query().Select(c => c.Id).ToList();
-                                                foreach (var tid in taskIds)
-                                                {
-                                                    try
-                                                    {
-                                                        var info = LiteDBHelper.TaskStore.Get(tid);
-                                                        if (info != null)
-                                                        {
-                                                            // 判断是否存在
-                                                            var exist = taskStore.Any(c => c.Id == info.Id);
-                                                            if (!exist)
-                                                            {
-                                                                taskStore.Add(info);
-                                                                success++;
-                                                            }
-                                                        }
-                                                    }
-                                                    catch (Exception ex)
-                                                    {
-                                                        _logger.Error(ex, "LiteDB 自动迁移绘图任务数异常 TaskId: {@0}", tid);
-                                                    }
-                                                }
-
-                                                _logger.Information("LiteDB 自动迁移绘图任务数据 success: {@0}", success);
-                                            }
-                                        }
-                                    });
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.Error(ex, "LiteDB 自动迁移绘图任务数据 error");
-                                }
-                            });
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.Error(ex, "LiteDB 数据迁移任务信息异常");
-                        }
-                    }
-
-                    // 迁移 account user domain banded
                     // 是否开启 MongoDB 自动迁移
-                    if (setting.DatabaseType != DatabaseType.LiteDB && setting.DatabaseType != DatabaseType.MongoDB && setting.IsAutoMigrateMongo)
+                    if (setting.DatabaseType != DatabaseType.MongoDB && setting.IsAutoMigrateMongo)
                     {
                         try
                         {
@@ -434,7 +237,7 @@ namespace Midjourney.API
                                                     // 判断最后一条是否存在
                                                     var success = 0;
                                                     var error = 0;
-                                                    var last = mongo.GetCollection<TaskInfo>().Find(x => true).SortByDescending(c => c.SubmitTime).FirstOrDefault();
+                                                    var last = mongo.GetCollection<TaskInfo>().Find(x => true, new FindOptions() { AllowDiskUse = true }).SortByDescending(c => c.SubmitTime).FirstOrDefault();
                                                     if (last != null)
                                                     {
                                                         var taskStore = DbHelper.Instance.TaskStore;
@@ -442,7 +245,7 @@ namespace Midjourney.API
                                                         if (lastModel == null)
                                                         {
                                                             // 迁移数据
-                                                            var taskIds = mongo.GetCollection<TaskInfo>().Find(x => true).Project(c => c.Id).ToList();
+                                                            var taskIds = mongo.GetCollection<TaskInfo>().Find(x => true, new FindOptions() { AllowDiskUse = true }).Project(c => c.Id).ToList();
                                                             foreach (var tid in taskIds)
                                                             {
                                                                 try
@@ -605,9 +408,10 @@ namespace Midjourney.API
                         }
                     }
 
-                    // 订阅 redis 消息
-                    if (setting.IsValidRedis)
+                    // 必须配置 redis
+                    if (GlobalConfiguration.Setting.IsValidRedis)
                     {
+                        // 订阅 redis 消息
                         RedisHelper.Subscribe((RedisHelper.Prefix + Constants.REDIS_NOTIFY_CHANNEL, async msg =>
                         {
                             try
@@ -647,8 +451,86 @@ namespace Midjourney.API
             }
         }
 
+        /// <summary>
+        /// 多节点版本一致性更新检查
+        /// </summary>
+        /// <returns></returns>
+        private async Task ConsulVersionCheck()
+        {
+            var setting = GlobalConfiguration.Setting;
+
+            // 启用版本对比更新检查，启用时以注册中心的服务版本为准，如果版本过低则执行更新检查，然后退出应用程序
+            if (setting.ConsulOptions?.Enable == true && setting.ConsulOptions.EnableVersionCheck)
+            {
+                try
+                {
+                    var currentVersion = GlobalConfiguration.Version;
+                    var consulVersion = await _consulService.GetCurrentVersionAsync();
+                    if (!string.IsNullOrWhiteSpace(consulVersion) && !string.IsNullOrWhiteSpace(consulVersion) && currentVersion != consulVersion)
+                    {
+                        var exeVer = new Version(currentVersion.TrimStart('v'));
+                        var conVer = new Version(consulVersion.TrimStart('v'));
+                        if (exeVer < conVer)
+                        {
+                            _logger.Information("注册中心检测到新版本，当前版本: {@0}，注册中心版本: {@1}，开始更新检查...", currentVersion, consulVersion);
+
+                            // 检查更新，当有可用更新时
+                            var downloding = await UpgradeCheck();
+                            if (downloding)
+                            {
+                                // 最多等待 5 分钟，获取下载状态
+                                var downlodingTask = new Task(() =>
+                                {
+                                    var sw = new Stopwatch();
+                                    sw.Start();
+                                    while (sw.Elapsed.TotalMinutes < 5)
+                                    {
+                                        var status = _upgradeService.GetUpgradeStatus();
+                                        if (status.Status == UpgradeStatus.ReadyToRestart)
+                                        {
+                                            break;
+                                        }
+                                        Thread.Sleep(1000);
+                                    }
+                                });
+                                downlodingTask.Start();
+                                downlodingTask.Wait();
+
+                                // 再次获取状态
+                                var finalStatus = _upgradeService.GetUpgradeStatus();
+                                if (finalStatus.Status == UpgradeStatus.ReadyToRestart)
+                                {
+                                    _logger.Information("注册中心版本更新检查完成，应用程序即将退出以完成更新。");
+
+                                    // 使用非 0 退出码，表示需要重启应用程序
+                                    Environment.Exit(101);
+
+                                    return;
+                                }
+                                else
+                                {
+                                    _logger.Warning("注册中心版本更新检查完成，但更新未能成功完成，状态：{@0}，请手动检查更新。", finalStatus.Status);
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error(ex, "Consul 版本对比更新检查执行失败");
+                }
+            }
+        }
+
         private async void DoWork(object state)
         {
+            // 必须配置 redis
+            if (!GlobalConfiguration.Setting.IsValidRedis)
+            {
+                Log.Error("系统配置错误，请检查Redis配置");
+                return;
+            }
+
             _logger.Information("开始例行检查");
 
             try
@@ -657,13 +539,16 @@ namespace Midjourney.API
                 {
                     try
                     {
+                        // 多节点版本一致性更新检查
+                        await ConsulVersionCheck();
+
                         // 异步更新检查
                         _ = UpgradeCheck();
 
                         var now = new DateTimeOffset(DateTime.Now.Date).ToUnixTimeMilliseconds();
 
                         GlobalConfiguration.TodayDraw = (int)DbHelper.Instance.TaskStore.Count(x => x.SubmitTime >= now);
-                        GlobalConfiguration.TotalDraw = (int)DbHelper.Instance.TaskStore.Count(x => true);
+                        GlobalConfiguration.TotalDraw = (int)DbHelper.Instance.TaskStore.Count();
 
                         // 用户绘图统计
                         UserStat();
@@ -714,7 +599,7 @@ namespace Midjourney.API
                     var taskColl = MongoHelper.GetCollection<TaskInfo>();
                     var userColl = MongoHelper.GetCollection<User>();
 
-                    userTotalCount = taskColl.AsQueryable()
+                    userTotalCount = taskColl.AsQueryable(new AggregateOptions() { AllowDiskUse = true })
                            .GroupBy(c => c.UserId)
                            .Select(g => new
                            {
@@ -725,7 +610,7 @@ namespace Midjourney.API
                            .Where(c => !string.IsNullOrWhiteSpace(c.UserId))
                            .ToDictionary(c => c.UserId, c => c.TotalCount);
 
-                    userTodayCount = taskColl.AsQueryable()
+                    userTodayCount = taskColl.AsQueryable(new AggregateOptions() { AllowDiskUse = true })
                            .Where(c => c.SubmitTime >= now)
                            .GroupBy(c => c.UserId)
                            .Select(g => new
@@ -750,46 +635,46 @@ namespace Midjourney.API
                         userColl.UpdateOne(c => c.Id == item.Key, update);
                     }
                 }
-                else if (setting.DatabaseType == DatabaseType.LiteDB)
-                {
-                    userTotalCount = LiteDBHelper.TaskStore.GetCollection()
-                        .Query()
-                        .Select(c => c.UserId)
-                        .ToList()
-                        .GroupBy(c => c)
-                        .Select(g => new
-                        {
-                            UserId = g.Key,
-                            TotalCount = g.Count()
-                        })
-                        .Where(c => !string.IsNullOrWhiteSpace(c.UserId))
-                        .ToDictionary(c => c.UserId, c => c.TotalCount);
+                //else if (setting.DatabaseType == DatabaseType.LiteDB)
+                //{
+                //    userTotalCount = LiteDBHelper.TaskStore.GetCollection()
+                //        .Query()
+                //        .Select(c => c.UserId)
+                //        .ToList()
+                //        .GroupBy(c => c)
+                //        .Select(g => new
+                //        {
+                //            UserId = g.Key,
+                //            TotalCount = g.Count()
+                //        })
+                //        .Where(c => !string.IsNullOrWhiteSpace(c.UserId))
+                //        .ToDictionary(c => c.UserId, c => c.TotalCount);
 
-                    userTodayCount = LiteDBHelper.TaskStore.GetCollection()
-                        .Query()
-                        .Where(c => c.SubmitTime >= now)
-                        .Select(c => c.UserId)
-                        .ToList()
-                        .GroupBy(c => c)
-                        .Select(g => new
-                        {
-                            UserId = g.Key,
-                            TotalCount = g.Count()
-                        })
-                        .Where(c => !string.IsNullOrWhiteSpace(c.UserId))
-                        .ToDictionary(c => c.UserId, c => c.TotalCount);
+                //    userTodayCount = LiteDBHelper.TaskStore.GetCollection()
+                //        .Query()
+                //        .Where(c => c.SubmitTime >= now)
+                //        .Select(c => c.UserId)
+                //        .ToList()
+                //        .GroupBy(c => c)
+                //        .Select(g => new
+                //        {
+                //            UserId = g.Key,
+                //            TotalCount = g.Count()
+                //        })
+                //        .Where(c => !string.IsNullOrWhiteSpace(c.UserId))
+                //        .ToDictionary(c => c.UserId, c => c.TotalCount);
 
-                    foreach (var item in userTotalCount)
-                    {
-                        if (!userTodayCount.ContainsKey(item.Key))
-                        {
-                            userTodayCount[item.Key] = 0;
-                        }
+                //    foreach (var item in userTotalCount)
+                //    {
+                //        if (!userTodayCount.ContainsKey(item.Key))
+                //        {
+                //            userTodayCount[item.Key] = 0;
+                //        }
 
-                        var userColl = LiteDBHelper.TaskStore.LiteDatabase.GetCollection<User>();
-                        userColl.UpdateMany($"{{ TotalDrawCount: {item.Value}, DayDrawCount: {userTodayCount[item.Key]} }}", $"_id = '{item.Key}'");
-                    }
-                }
+                //        var userColl = LiteDBHelper.TaskStore.LiteDatabase.GetCollection<User>();
+                //        userColl.UpdateMany($"{{ TotalDrawCount: {item.Value}, DayDrawCount: {userTodayCount[item.Key]} }}", $"_id = '{item.Key}'");
+                //    }
+                //}
                 else
                 {
                     var freeSql = FreeSqlHelper.FreeSql;
@@ -900,28 +785,6 @@ namespace Midjourney.API
             // 如果超过 x 条，删除最早插入的数据
             switch (setting.DatabaseType)
             {
-                case DatabaseType.NONE:
-                    break;
-
-                case DatabaseType.LiteDB:
-                    {
-                        var documentCount = DbHelper.Instance.TaskStore.Count();
-                        if (documentCount > maxCount)
-                        {
-                            var documentsToDelete = (int)documentCount - maxCount;
-                            var ids = LiteDBHelper.TaskStore.GetCollection().Query().OrderBy(c => c.SubmitTime)
-                                .Limit(documentsToDelete)
-                                .ToList()
-                                .Select(c => c.Id);
-
-                            if (ids.Any())
-                            {
-                                LiteDBHelper.TaskStore.GetCollection().DeleteMany(c => ids.Contains(c.Id));
-                            }
-                        }
-                    }
-                    break;
-
                 case DatabaseType.MongoDB:
                     {
                         var coll = MongoHelper.GetCollection<TaskInfo>();
@@ -929,7 +792,7 @@ namespace Midjourney.API
                         if (documentCount > maxCount)
                         {
                             var documentsToDelete = documentCount - maxCount;
-                            var ids = coll.Find(c => true).SortBy(c => c.SubmitTime).Limit((int)documentsToDelete).Project(c => c.Id).ToList();
+                            var ids = coll.Find(c => true, new FindOptions() { AllowDiskUse = true }).SortBy(c => c.SubmitTime).Limit((int)documentsToDelete).Project(c => c.Id).ToList();
                             if (ids.Any())
                             {
                                 coll.DeleteMany(c => ids.Contains(c.Id));
@@ -984,7 +847,7 @@ namespace Midjourney.API
                 {
                     try
                     {
-                        DrawCounter.InitAccountTodayCounter(account.ChannelId);
+                        //DrawCounter.InitAccountTodayCounter(account.ChannelId);
 
                         await StartAccount(account);
                     }
@@ -1074,11 +937,10 @@ namespace Midjourney.API
                 }
 
                 disInstance = _discordLoadBalancer.GetDiscordInstance(account.ChannelId);
-
-                // 判断是否在工作时间内
-                // 只要在工作时间内，就创建实例
                 var now = new DateTimeOffset(DateTime.Now.Date).ToUnixTimeMilliseconds();
-                if (DateTime.Now.IsInWorkTime(account.WorkTime))
+
+                // 只要在工作时间内或摸鱼时间内，就创建实例
+                if (DateTime.Now.IsInWorkTime(account.WorkTime) || DateTime.Now.IsInFishTime(account.FishingTime))
                 {
                     if (disInstance == null)
                     {
@@ -1184,7 +1046,11 @@ namespace Midjourney.API
                         {
                             // 这里应该等待初始化完成，并获取用户信息验证，获取用户成功后设置为可用状态
                             // 多账号启动时，等待一段时间再启动下一个账号
-                            await Task.Delay(1000 * 5);
+                            // Discord 账号启动间隔时间
+                            if (account.IsDiscord)
+                            {
+                                await Task.Delay(1000 * 5);
+                            }
 
                             // 启动后强制同步
                             var success = await disInstance.SyncInfoSetting(true);
@@ -1240,10 +1106,10 @@ namespace Midjourney.API
                 else
                 {
                     sw.Stop();
-                    info.AppendLine($"{account.Id}初始化中... 非工作时间，不创建实例耗时: {sw.ElapsedMilliseconds}ms");
+                    info.AppendLine($"{account.Id}初始化中... 非工作/摸鱼时间，不创建实例耗时: {sw.ElapsedMilliseconds}ms");
                     sw.Restart();
 
-                    // 非工作时间内，如果存在实例则释放
+                    // 非工作/摸鱼时间内，如果存在实例则释放
                     if (disInstance != null)
                     {
                         _discordLoadBalancer.RemoveInstance(disInstance);
@@ -1251,7 +1117,7 @@ namespace Midjourney.API
                     }
 
                     sw.Stop();
-                    info.AppendLine($"{account.Id}初始化中... 非工作时间，释放实例耗时: {sw.ElapsedMilliseconds}ms");
+                    info.AppendLine($"{account.Id}初始化中... 非工作/摸鱼时间，释放实例耗时: {sw.ElapsedMilliseconds}ms");
                     sw.Restart();
                 }
             }
@@ -1425,8 +1291,8 @@ namespace Midjourney.API
             model.CfHashUrl = null;
             model.CfUrl = null;
 
-            // 清除风控状态
-            model.RiskControlUnlockTime = null;
+            //// 清除风控状态
+            //model.RiskControlUnlockTime = null;
 
             // 验证 Interval
             if (param.Interval < 0m)
@@ -1659,27 +1525,15 @@ namespace Midjourney.API
                                 return;
                             }
 
-                            var targetTask = _discordLoadBalancer.GetRunningTasks().FirstOrDefault(t => t.Id == notification.TaskInfoId);
-
-                            // 如果任务不在队列中，则从存储中获取
-                            if (targetTask == null)
+                            if (DiscordInstance.GlobalRunningTasks.TryGetValue(notification.TaskInfoId, out var task) && task != null)
                             {
-                                targetTask = DbHelper.Instance.TaskStore.Get(notification.TaskInfoId);
-                            }
-
-                            if (targetTask != null)
-                            {
-                                if (!targetTask.IsCompleted)
-                                {
-                                    targetTask.Fail("取消任务");
-
-                                    DbHelper.Instance.TaskStore.Update(targetTask);
-                                }
+                                task.Fail("取消任务");
+                                DbHelper.Instance.TaskStore.Update(task);
                             }
                         }
                         break;
 
-                    case ENotificationType.CompleteTaskInfo:
+                    case ENotificationType.DeleteTaskInfo:
                         {
                             // 判断是否自身发出的
                             if (isSelf)
@@ -1687,7 +1541,23 @@ namespace Midjourney.API
                                 return;
                             }
 
-                            DrawCounter.Complete(notification.TaskInfo, notification.IsSuccess, false);
+                            if (DiscordInstance.GlobalRunningTasks.TryGetValue(notification.TaskInfoId, out var task) && task != null)
+                            {
+                                task.Fail("删除任务");
+                                DbHelper.Instance.TaskStore.Delete(task.Id);
+                            }
+                        }
+                        break;
+
+                    case ENotificationType.CompleteTaskInfo:
+                        {
+                            //// 判断是否自身发出的
+                            //if (isSelf)
+                            //{
+                            //    return;
+                            //}
+
+                            //DrawCounter.Complete(notification.TaskInfo, notification.IsSuccess, false);
                         }
                         break;
 
@@ -1776,6 +1646,7 @@ namespace Midjourney.API
                             }
 
                             await SettingHelper.Instance.LoadAsync();
+                            SettingHelper.Instance.ApplySettings();
                         }
                         break;
 

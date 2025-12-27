@@ -25,6 +25,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
+using MongoDB.Driver;
 
 namespace Midjourney.API.Controllers
 {
@@ -72,7 +73,7 @@ namespace Midjourney.API.Controllers
 
                 dto.TodayDraw = (int)DbHelper.Instance.TaskStore.Count(x => x.SubmitTime >= now);
                 dto.YesterdayDraw = (int)DbHelper.Instance.TaskStore.Count(x => x.SubmitTime >= yesterday && x.SubmitTime < now);
-                dto.TotalDraw = (int)DbHelper.Instance.TaskStore.Count(x => true);
+                dto.TotalDraw = (int)DbHelper.Instance.TaskStore.Count();
 
                 // 今日绘图客户端 top 10
                 var setting = GlobalConfiguration.Setting;
@@ -132,31 +133,65 @@ namespace Midjourney.API.Controllers
                     dto.PrivateIp = localIp;
                 }
 
+                // 使用数据库统计
+                if (GlobalConfiguration.Setting.DatabaseType == DatabaseType.MongoDB)
+                {
+                    //var taskInfos = MongoHelper.GetCollection<TaskInfo>().AsQueryable()
+                    //      .Where(c => c.SubmitTime >= now && c.Status == TaskStatus.SUCCESS)
+                    //      .GroupBy(c => new { c.Mode, c.Action })
+                    //      .ToList()
+                    //      .ToDictionary(c => c.Key, c => c.Count());
+
+                    var collection = MongoHelper.GetCollection<TaskInfo>();
+                    var aggregateOptions = new AggregateOptions { AllowDiskUse = true };
+                    var taskInfos = collection.Aggregate(aggregateOptions)
+                        .Match(c => c.SubmitTime >= now && c.Status == TaskStatus.SUCCESS)
+                        .Group(
+                            c => new { c.Mode, c.Action },
+                            g => new { Key = g.Key, Count = g.Count() }
+                        )
+                        .ToList()
+                        .ToDictionary(c => c.Key, c => c.Count);
+
+                    var homeCounter = new Dictionary<GenerationSpeedMode, Dictionary<TaskAction, int>>();
+                    foreach (var kvp in taskInfos)
+                    {
+                        var mode = kvp.Key.Mode ?? GenerationSpeedMode.FAST;
+                        if (!homeCounter.ContainsKey(mode))
+                        {
+                            homeCounter[mode] = [];
+                        }
+                        homeCounter[mode][kvp.Key.Action ?? TaskAction.IMAGINE] = kvp.Value;
+                    }
+                    dto.TodayCounter = homeCounter.OrderBy(c => c.Key).ToDictionary(c => c.Key, c => c.Value.OrderBy(x => x.Key).ToDictionary(x => x.Key, x => x.Value));
+                }
+                else
+                {
+                    var fsql = FreeSqlHelper.FreeSql;
+                    if (fsql != null)
+                    {
+                        var taskInfos = fsql.Select<TaskInfo>()
+                              .Where(c => c.SubmitTime >= now && c.Status == TaskStatus.SUCCESS)
+                              .GroupBy(c => new { c.Mode, c.Action })
+                              .ToList(c => new { c.Key, Count = c.Count() })
+                              .ToDictionary(c => c.Key, c => c.Count);
+                        var homeCounter = new Dictionary<GenerationSpeedMode, Dictionary<TaskAction, int>>();
+                        foreach (var kvp in taskInfos)
+                        {
+                            var mode = kvp.Key.Mode ?? GenerationSpeedMode.FAST;
+                            if (!homeCounter.ContainsKey(mode))
+                            {
+                                homeCounter[mode] = [];
+                            }
+                            homeCounter[mode][kvp.Key.Action ?? TaskAction.IMAGINE] = kvp.Value;
+                        }
+                        dto.TodayCounter = homeCounter.OrderBy(c => c.Key).ToDictionary(c => c.Key, c => c.Value.OrderBy(x => x.Key).ToDictionary(x => x.Key, x => x.Value));
+                    }
+                }
+
                 return dto;
             });
             data.SystemInfo = SystemInfo.GetCurrentSystemInfo();
-
-            var homeCounter = new Dictionary<GenerationSpeedMode, Dictionary<TaskAction, int>>();
-            var counter = DrawCounter.AccountTodaySuccessCounter;
-            var all = counter.Where(c => c.Key.StartsWith(now)).SelectMany(c => c.Value).ToList();
-            foreach (var item in all)
-            {
-                if (!homeCounter.ContainsKey(item.Key))
-                {
-                    homeCounter.TryAdd(item.Key, []);
-                }
-
-                foreach (var action in item.Value)
-                {
-                    if (!homeCounter[item.Key].ContainsKey(action.Key))
-                    {
-                        homeCounter[item.Key][action.Key] = 0;
-                    }
-
-                    homeCounter[item.Key][action.Key] += action.Value;
-                }
-            }
-            data.TodayCounter = homeCounter.OrderBy(c => c.Key).ToDictionary(c => c.Key, c => c.Value.OrderBy(x => x.Key).ToDictionary(x => x.Key, x => x.Value));
 
             return Result.Ok(data);
         }

@@ -908,19 +908,21 @@ namespace Midjourney.API.Controllers
             // 赞助账号
             if (account.IsSponsor)
             {
-                account.SponsorUserId = user.Id;
+                throw new LogicException("赞助账号功能已下线");
 
-                // 赞助者禁止配置的选项
-                if (user.Role != EUserRole.ADMIN)
-                {
-                    account.Sort = 0;
-                    account.SubChannels.Clear();
-                    account.WorkTime = null;
-                    account.FishingTime = null;
-                }
+                //account.SponsorUserId = user.Id;
 
-                // 赞助者参数校验
-                account.SponsorValidate();
+                //// 赞助者禁止配置的选项
+                //if (user.Role != EUserRole.ADMIN)
+                //{
+                //    account.Sort = 0;
+                //    account.SubChannels.Clear();
+                //    account.WorkTime = null;
+                //    account.FishingTime = null;
+                //}
+
+                //// 赞助者参数校验
+                //account.SponsorValidate();
             }
 
             // 悠船账号
@@ -948,96 +950,6 @@ namespace Midjourney.API.Controllers
 
             return Result.Ok();
         }
-
-        ///// <summary>
-        ///// 编辑账号（废弃）
-        ///// </summary>
-        ///// <param name="param"></param>
-        ///// <returns></returns>
-        //[HttpPut("account/{id}")]
-        //public async Task<Result> AccountEdit([FromBody] DiscordAccount param)
-        //{
-        //    var setting = GlobalConfiguration.Setting;
-        //    var user = _workContext.GetUser();
-
-        //    if (user == null)
-        //    {
-        //        return Result.Fail("演示模式，禁止操作");
-        //    }
-
-        //    if (!setting.EnableAccountSponsor && user.Role != EUserRole.ADMIN)
-        //    {
-        //        return Result.Fail("未开启赞助功能，禁止操作");
-        //    }
-
-        //    var model = DbHelper.Instance.AccountStore.Get(param.Id);
-        //    if (model == null)
-        //    {
-        //        throw new LogicException("账号不存在");
-        //    }
-
-        //    if (user.Role != EUserRole.ADMIN && model.SponsorUserId != user.Id)
-        //    {
-        //        return Result.Fail("无权限操作");
-        //    }
-
-        //    // 赞助者禁止配置的选项
-        //    if (user.Role != EUserRole.ADMIN)
-        //    {
-        //        param.Sort = model.Sort;
-        //        param.SubChannels = model.SubChannels;
-        //        param.WorkTime = model.WorkTime;
-        //        param.FishingTime = model.WorkTime;
-
-        //        // 赞助者参数校验
-        //        param.SponsorValidate();
-        //    }
-
-        //    model.LoginAccount = param.LoginAccount?.Trim();
-        //    model.LoginPassword = param.LoginPassword?.Trim();
-        //    model.Login2fa = param.Login2fa?.Trim();
-        //    model.IsAutoLogining = false; // 重置自动登录状态
-        //    model.LoginStart = null;
-        //    model.LoginEnd = null;
-        //    model.LoginMessage = null;
-
-        //    model.NijiBotChannelId = param.NijiBotChannelId;
-        //    model.PrivateChannelId = param.PrivateChannelId;
-        //    model.RemixAutoSubmit = param.RemixAutoSubmit;
-        //    model.TimeoutMinutes = param.TimeoutMinutes;
-        //    model.Weight = param.Weight;
-        //    model.Remark = param.Remark;
-        //    model.Sponsor = param.Sponsor;
-        //    model.Sort = param.Sort;
-        //    model.PermanentInvitationLink = param.PermanentInvitationLink;
-        //    model.IsVerticalDomain = param.IsVerticalDomain;
-        //    model.VerticalDomainIds = param.VerticalDomainIds;
-        //    model.SubChannels = param.SubChannels;
-        //    model.IsBlend = param.IsBlend;
-        //    model.EnableMj = param.EnableMj;
-        //    model.EnableNiji = param.EnableNiji;
-        //    model.IsDescribe = param.IsDescribe;
-        //    model.IsShorten = param.IsShorten;
-        //    model.DayDrawLimit = param.DayDrawLimit;
-        //    model.DayRelaxDrawLimit = param.DayRelaxDrawLimit;
-        //    model.IsRelaxVideo = param.IsRelaxVideo;
-        //    model.IsHdVideo = param.IsHdVideo;
-        //    model.OfficialEnablePersonalize = param.OfficialEnablePersonalize;
-
-        //    // 如果是悠船、官方
-        //    // 清除禁用原因
-        //    if (model.IsYouChuan || model.IsOfficial)
-        //    {
-        //        model.DisabledReason = null;
-        //    }
-
-        //    // 初始化子频道
-        //    model.InitSubChannels();
-
-        //    await _discordAccountInitializer.UpdateAccount(model);
-
-        //    return Result.Ok();
-        //}
 
         /// <summary>
         /// 更新账号并重新连接
@@ -1248,34 +1160,6 @@ namespace Midjourney.API.Controllers
                     .Take(page.PageSize)
                     .ToList();
             }
-            else if (setting.DatabaseType == DatabaseType.LiteDB)
-            {
-                var query = LiteDBHelper.AccountStore.GetCollection().Query()
-                    .WhereIf(!string.IsNullOrWhiteSpace(param.GuildId), c => c.GuildId == param.GuildId)
-                    .WhereIf(!string.IsNullOrWhiteSpace(param.ChannelId), c => c.ChannelId == param.ChannelId)
-                    .WhereIf(param.Enable.HasValue, c => c.Enable == param.Enable)
-                    .WhereIf(!string.IsNullOrWhiteSpace(param.Remark), c => c.Remark.Contains(param.Remark))
-                    .WhereIf(!string.IsNullOrWhiteSpace(param.Sponsor), c => c.Sponsor.Contains(param.Sponsor));
-
-                if (allowModes.Length > 0)
-                {
-                    var m1 = allowModes.First();
-                    query = query.Where(c => c.AllowModes.Contains(m1));
-                }
-
-                count = query.Count();
-                list = query
-                    .OrderByIf(nameof(DiscordAccount.GuildId).Equals(sort.Predicate, StringComparison.OrdinalIgnoreCase), c => c.GuildId, sort.Reverse)
-                    .OrderByIf(nameof(DiscordAccount.ChannelId).Equals(sort.Predicate, StringComparison.OrdinalIgnoreCase), c => c.ChannelId, sort.Reverse)
-                    .OrderByIf(nameof(DiscordAccount.Enable).Equals(sort.Predicate, StringComparison.OrdinalIgnoreCase), c => c.Enable, sort.Reverse)
-                    .OrderByIf(nameof(DiscordAccount.Remark).Equals(sort.Predicate, StringComparison.OrdinalIgnoreCase), c => c.Remark, sort.Reverse)
-                    .OrderByIf(nameof(DiscordAccount.Sponsor).Equals(sort.Predicate, StringComparison.OrdinalIgnoreCase), c => c.Sponsor, sort.Reverse)
-                    .OrderByIf(nameof(DiscordAccount.DateCreated).Equals(sort.Predicate, StringComparison.OrdinalIgnoreCase), c => c.DateCreated, sort.Reverse)
-                    .OrderByIf(string.IsNullOrWhiteSpace(sort.Predicate), c => c.DateCreated, true)
-                    .Skip((page.Current - 1) * page.PageSize)
-                    .Limit(page.PageSize)
-                    .ToList();
-            }
             else
             {
                 var freeSql = FreeSqlHelper.FreeSql;
@@ -1347,7 +1231,6 @@ namespace Midjourney.API.Controllers
                 }
             }
 
-            var counter = DrawCounter.AccountTodaySuccessCounter;
             foreach (var item in list)
             {
                 var inc = _loadBalancer.GetDiscordInstance(item.ChannelId);
@@ -1362,28 +1245,14 @@ namespace Midjourney.API.Controllers
                 item.Running = inc?.IsAlive ?? false;
 
                 // 计算今日绘图统计（成功）
-                var drawKey = $"{DateTime.Now.Date:yyyyMMdd}_{item.ChannelId}";
-                if (counter.TryGetValue(drawKey, out var counterValue))
-                {
-                    item.TodayCounter = counterValue.OrderBy(c => c.Key).ToDictionary(c => c.Key, c => c.Value.OrderBy(x => x.Key).ToDictionary(x => x.Key, x => x.Value));
-
-                    if (counterValue.TryGetValue(GenerationSpeedMode.FAST, out var fasts))
-                    {
-                        item.TodayFastDrawCount = fasts.Sum(x => x.Value);
-                    }
-                    if (counterValue.TryGetValue(GenerationSpeedMode.TURBO, out var turbos))
-                    {
-                        item.TodayTurboDrawCount = turbos.Sum(x => x.Value);
-                    }
-                    if (counterValue.TryGetValue(GenerationSpeedMode.RELAX, out var relaxs))
-                    {
-                        item.TodayRelaxDrawCount = relaxs.Sum(x => x.Value);
-                    }
-                }
+                item.TodayCounter = CounterHelper.GetAccountTodaySuccessCountDict(item.ChannelId);
+                item.TodayFastDrawCount = CounterHelper.GetAccountTodaySuccessTotalCount(item.ChannelId, GenerationSpeedMode.FAST);
+                item.TodayTurboDrawCount = CounterHelper.GetAccountTodaySuccessTotalCount(item.ChannelId, GenerationSpeedMode.TURBO);
+                item.TodayRelaxDrawCount = CounterHelper.GetAccountTodaySuccessTotalCount(item.ChannelId, GenerationSpeedMode.RELAX);
 
                 // 计算今日累计绘图（包含失败，不包含放大）
-                item.DayFastCount = DrawCounter.GetAccountTodayTotalCount(item.ChannelId, GenerationSpeedMode.FAST);
-                item.DayRelaxCount = DrawCounter.GetAccountTodayTotalCount(item.ChannelId, GenerationSpeedMode.RELAX);
+                item.DayFastCount = CounterHelper.GetAccountTodayTotalCount(item.ChannelId, GenerationSpeedMode.FAST);
+                item.DayRelaxCount = CounterHelper.GetAccountTodayTotalCount(item.ChannelId, GenerationSpeedMode.RELAX);
 
                 if (user == null || (user.Role != EUserRole.ADMIN && user.Id != item.SponsorUserId))
                 {
@@ -1443,7 +1312,7 @@ namespace Midjourney.API.Controllers
             var setting = GlobalConfiguration.Setting;
             if (setting.DatabaseType == DatabaseType.MongoDB)
             {
-                var coll = MongoHelper.GetCollection<TaskInfo>().AsQueryable();
+                var coll = MongoHelper.GetCollection<TaskInfo>().AsQueryable(new AggregateOptions() { AllowDiskUse = true });
                 var query = coll
                     .WhereIf(param.Mode == GenerationSpeedMode.FAST, c => c.Mode == param.Mode || c.Mode == null)
                     .WhereIf(param.Mode == GenerationSpeedMode.TURBO, c => c.Mode == param.Mode)
@@ -1466,30 +1335,30 @@ namespace Midjourney.API.Controllers
 
                 return Ok(data);
             }
-            else if (setting.DatabaseType == DatabaseType.LiteDB)
-            {
-                var query = LiteDBHelper.TaskStore.GetCollection().Query()
-                .WhereIf(param.Mode == GenerationSpeedMode.FAST, c => c.Mode == param.Mode || c.Mode == null)
-                .WhereIf(param.Mode == GenerationSpeedMode.TURBO, c => c.Mode == param.Mode)
-                .WhereIf(param.Mode == GenerationSpeedMode.RELAX, c => c.Mode == param.Mode)
-                .WhereIf(!string.IsNullOrWhiteSpace(param.Id), c => c.Id == param.Id || c.State == param.Id)
-                .WhereIf(!string.IsNullOrWhiteSpace(param.InstanceId), c => c.InstanceId == param.InstanceId)
-                .WhereIf(param.Status.HasValue, c => c.Status == param.Status)
-                .WhereIf(param.Action.HasValue, c => c.Action == param.Action)
-                .WhereIf(!string.IsNullOrWhiteSpace(param.FailReason), c => c.FailReason.Contains(param.FailReason))
-                .WhereIf(!string.IsNullOrWhiteSpace(param.Description), c => c.Prompt.Contains(param.Description));
+            //else if (setting.DatabaseType == DatabaseType.LiteDB)
+            //{
+            //    var query = LiteDBHelper.TaskStore.GetCollection().Query()
+            //    .WhereIf(param.Mode == GenerationSpeedMode.FAST, c => c.Mode == param.Mode || c.Mode == null)
+            //    .WhereIf(param.Mode == GenerationSpeedMode.TURBO, c => c.Mode == param.Mode)
+            //    .WhereIf(param.Mode == GenerationSpeedMode.RELAX, c => c.Mode == param.Mode)
+            //    .WhereIf(!string.IsNullOrWhiteSpace(param.Id), c => c.Id == param.Id || c.State == param.Id)
+            //    .WhereIf(!string.IsNullOrWhiteSpace(param.InstanceId), c => c.InstanceId == param.InstanceId)
+            //    .WhereIf(param.Status.HasValue, c => c.Status == param.Status)
+            //    .WhereIf(param.Action.HasValue, c => c.Action == param.Action)
+            //    .WhereIf(!string.IsNullOrWhiteSpace(param.FailReason), c => c.FailReason.Contains(param.FailReason))
+            //    .WhereIf(!string.IsNullOrWhiteSpace(param.Description), c => c.Prompt.Contains(param.Description));
 
-                var count = query.Count();
-                var list = query
-                    .OrderByDescending(c => c.SubmitTime)
-                    .Skip((page.Current - 1) * page.PageSize)
-                    .Limit(page.PageSize)
-                    .ToList();
+            //    var count = query.Count();
+            //    var list = query
+            //        .OrderByDescending(c => c.SubmitTime)
+            //        .Skip((page.Current - 1) * page.PageSize)
+            //        .Limit(page.PageSize)
+            //        .ToList();
 
-                var data = list.ToTableResult(request.Pagination.Current, request.Pagination.PageSize, count);
+            //    var data = list.ToTableResult(request.Pagination.Current, request.Pagination.PageSize, count);
 
-                return Ok(data);
-            }
+            //    return Ok(data);
+            //}
             else
             {
                 var freeSql = FreeSqlHelper.FreeSql;
@@ -1545,30 +1414,35 @@ namespace Midjourney.API.Controllers
                 return Result.Fail("演示模式，禁止操作");
             }
 
-            var queueTask = _loadBalancer.GetQueueTasks().FirstOrDefault(t => t.Id == id);
-            if (queueTask != null)
+            var user = _workContext.GetUser();
+            var targetTask = DbHelper.Instance.TaskStore.Get(id);
+            if (targetTask != null)
             {
-                queueTask.Fail("删除任务");
-
-                Thread.Sleep(1000);
-            }
-
-            var task = DbHelper.Instance.TaskStore.Get(id);
-            if (task != null)
-            {
-                var ins = _loadBalancer.GetDiscordInstance(task.InstanceId);
-                if (ins != null)
+                // 管理员才能删除任务
+                if (user.Role == EUserRole.ADMIN)
                 {
-                    var model = ins.FindRunningTask(c => c.Id == id).FirstOrDefault();
-                    if (model != null)
+                    if (!targetTask.IsCompleted)
                     {
-                        model.Fail("删除任务");
+                        if (DiscordInstance.GlobalRunningTasks.TryGetValue(id, out var task) && task != null)
+                        {
+                            // 取消任务
+                            task.Fail("删除任务");
+                            DbHelper.Instance.TaskStore.Delete(id);
+                        }
+                        else
+                        {
+                            targetTask.Fail("删除任务");
+                            DbHelper.Instance.TaskStore.Delete(id);
 
-                        Thread.Sleep(1000);
+                            var notification = new RedisNotification
+                            {
+                                Type = ENotificationType.DeleteTaskInfo,
+                                TaskInfoId = id
+                            };
+                            RedisHelper.Publish(RedisHelper.Prefix + Constants.REDIS_NOTIFY_CHANNEL, notification.ToJson());
+                        }
                     }
                 }
-
-                DbHelper.Instance.TaskStore.Delete(id);
             }
 
             return Result.Ok();
@@ -1626,7 +1500,7 @@ namespace Midjourney.API.Controllers
                 var userIds = list.Select(c => c.Id).ToList();
                 if (userIds.Count > 0)
                 {
-                    userTotalCount = MongoHelper.GetCollection<TaskInfo>().AsQueryable()
+                    userTotalCount = MongoHelper.GetCollection<TaskInfo>().AsQueryable(new AggregateOptions() { AllowDiskUse = true })
                         .Where(c => userIds.Contains(c.UserId))
                         .GroupBy(c => c.UserId)
                         .Select(g => new
@@ -1635,41 +1509,6 @@ namespace Midjourney.API.Controllers
                             TotalCount = g.Count()
                         })
                         .ToList()
-                        .ToDictionary(c => c.UserId, c => c.TotalCount);
-                }
-            }
-            else if (setting.DatabaseType == DatabaseType.LiteDB)
-            {
-                var query = LiteDBHelper.UserStore.GetCollection().Query()
-                    .WhereIf(!string.IsNullOrWhiteSpace(param.Id), c => c.Id == param.Id)
-                    .WhereIf(!string.IsNullOrWhiteSpace(param.Name), c => c.Name.Contains(param.Name))
-                    .WhereIf(!string.IsNullOrWhiteSpace(param.Email), c => c.Email.Contains(param.Email))
-                    .WhereIf(!string.IsNullOrWhiteSpace(param.Phone), c => c.Phone.Contains(param.Phone))
-                    .WhereIf(param.Role.HasValue, c => c.Role == param.Role)
-                    .WhereIf(param.Status.HasValue, c => c.Status == param.Status);
-
-                count = query.Count();
-                list = query
-                   .OrderByDescending(c => c.UpdateTime)
-                   .Skip((page.Current - 1) * page.PageSize)
-                   .Limit(page.PageSize)
-                   .ToList();
-
-                // 计算用户累计绘图
-                var userIds = list.Select(c => c.Id).ToList();
-                if (userIds.Count > 0)
-                {
-                    userTotalCount = LiteDBHelper.TaskStore.GetCollection()
-                        .Query()
-                        .Where(c => userIds.Contains(c.UserId))
-                        .Select(c => c.UserId)
-                        .ToList()
-                        .GroupBy(c => c)
-                        .Select(g => new
-                        {
-                            UserId = g.Key,
-                            TotalCount = g.Count()
-                        })
                         .ToDictionary(c => c.UserId, c => c.TotalCount);
                 }
             }
@@ -1707,21 +1546,10 @@ namespace Midjourney.API.Controllers
                 }
             }
 
-            // 统计今日绘图数量
-            var drawCounter = DrawCounter.UserTodadSuccessCounter;
-
             foreach (var item in list)
             {
-                DrawCounter.InitUserTodayCounter(item.Id);
-
-                // 今日绘图统计
-                var key = $"{DateTime.Now.Date:yyyyMMdd}_{item.Id}";
-                if (drawCounter.TryGetValue(key, out var modeDic))
-                {
-                    item.DayDrawCount = modeDic.Values.SelectMany(c => c.Values).Sum();
-                }
-
-                item.TotalDrawCount = userTotalCount.TryGetValue(item.Id, out var totalCount) ? totalCount : 0;
+                item.DayDrawCount = CounterHelper.GetUserTodayTotalCount(item.Id);
+                item.TotalDrawCount = userTotalCount.TryGetValue(item.Id, out int value) ? value : 0;
             }
 
             if (_isAnonymous)
@@ -1906,19 +1734,19 @@ namespace Midjourney.API.Controllers
                     .Take(page.PageSize)
                     .ToList();
             }
-            else if (setting.DatabaseType == DatabaseType.LiteDB)
-            {
-                var query = LiteDBHelper.DomainStore.GetCollection().Query()
-                    .WhereIf(!string.IsNullOrWhiteSpace(param.Id), c => c.Id == param.Id)
-                    .WhereIf(!string.IsNullOrWhiteSpace(firstKeyword), c => c.Keywords.Contains(firstKeyword));
+            //else if (setting.DatabaseType == DatabaseType.LiteDB)
+            //{
+            //    var query = LiteDBHelper.DomainStore.GetCollection().Query()
+            //        .WhereIf(!string.IsNullOrWhiteSpace(param.Id), c => c.Id == param.Id)
+            //        .WhereIf(!string.IsNullOrWhiteSpace(firstKeyword), c => c.Keywords.Contains(firstKeyword));
 
-                count = query.Count();
-                list = query
-                   .OrderBy(c => c.Sort)
-                   .Skip((page.Current - 1) * page.PageSize)
-                   .Limit(page.PageSize)
-                   .ToList();
-            }
+            //    count = query.Count();
+            //    list = query
+            //       .OrderBy(c => c.Sort)
+            //       .Skip((page.Current - 1) * page.PageSize)
+            //       .Limit(page.PageSize)
+            //       .ToList();
+            //}
             else
             {
                 var freeSql = FreeSqlHelper.FreeSql;
@@ -2051,19 +1879,19 @@ namespace Midjourney.API.Controllers
                    .Take(page.PageSize)
                    .ToList();
             }
-            else if (setting.DatabaseType == DatabaseType.LiteDB)
-            {
-                var query = LiteDBHelper.BannedWordStore.GetCollection().Query()
-                    .WhereIf(!string.IsNullOrWhiteSpace(param.Id), c => c.Id == param.Id)
-                    .WhereIf(!string.IsNullOrWhiteSpace(firstKeyword), c => c.Keywords.Contains(firstKeyword));
+            //else if (setting.DatabaseType == DatabaseType.LiteDB)
+            //{
+            //    var query = LiteDBHelper.BannedWordStore.GetCollection().Query()
+            //        .WhereIf(!string.IsNullOrWhiteSpace(param.Id), c => c.Id == param.Id)
+            //        .WhereIf(!string.IsNullOrWhiteSpace(firstKeyword), c => c.Keywords.Contains(firstKeyword));
 
-                count = query.Count();
-                list = query
-                    .OrderBy(c => c.Sort)
-                    .Skip((page.Current - 1) * page.PageSize)
-                    .Limit(page.PageSize)
-                    .ToList();
-            }
+            //    count = query.Count();
+            //    list = query
+            //        .OrderBy(c => c.Sort)
+            //        .Skip((page.Current - 1) * page.PageSize)
+            //        .Limit(page.PageSize)
+            //        .ToList();
+            //}
             else
             {
                 var freeSql = FreeSqlHelper.FreeSql;
@@ -2354,6 +2182,10 @@ namespace Midjourney.API.Controllers
                     return Result.Fail("Redis 连接失败，请检查连接字符串是否正确");
                 }
             }
+            else
+            {
+                return Result.Fail("必须配置 Redis 模式");
+            }
 
             // 如果启用了风控验证
             if (setting.EnableRiskControlAutoCaptcha)
@@ -2374,15 +2206,12 @@ namespace Midjourney.API.Controllers
             // 首页缓存
             _memoryCache.Remove($"{DateTime.Now:yyyyMMdd}_home");
 
-            if (GlobalConfiguration.Setting.IsValidRedis)
+            // 通知所有节点
+            var notification = new RedisNotification
             {
-                // 通知所有节点
-                var notification = new RedisNotification
-                {
-                    Type = ENotificationType.SettingChanged,
-                };
-                RedisHelper.Publish(RedisHelper.Prefix + Constants.REDIS_NOTIFY_CHANNEL, notification.ToJson());
-            }
+                Type = ENotificationType.SettingChanged,
+            };
+            RedisHelper.Publish(RedisHelper.Prefix + Constants.REDIS_NOTIFY_CHANNEL, notification.ToJson());
 
             return Result.Ok();
         }
@@ -2405,15 +2234,12 @@ namespace Midjourney.API.Controllers
                 await _upgradeService.StartDownloadAsync();
             }
 
-            if (GlobalConfiguration.Setting.IsValidRedis)
+            // 通知所有节点
+            var notification = new RedisNotification
             {
-                // 通知所有节点
-                var notification = new RedisNotification
-                {
-                    Type = ENotificationType.CheckUpdate,
-                };
-                RedisHelper.Publish(RedisHelper.Prefix + Constants.REDIS_NOTIFY_CHANNEL, notification.ToJson());
-            }
+                Type = ENotificationType.CheckUpdate,
+            };
+            RedisHelper.Publish(RedisHelper.Prefix + Constants.REDIS_NOTIFY_CHANNEL, notification.ToJson());
 
             return Result.Ok(upgradeInfo);
         }
@@ -2531,15 +2357,12 @@ namespace Midjourney.API.Controllers
                 // 重启所有节点
                 if (all)
                 {
-                    if (GlobalConfiguration.Setting.IsValidRedis)
+                    // 通知所有节点
+                    var notification = new RedisNotification
                     {
-                        // 通知所有节点
-                        var notification = new RedisNotification
-                        {
-                            Type = ENotificationType.Restart,
-                        };
-                        RedisHelper.Publish(RedisHelper.Prefix + Constants.REDIS_NOTIFY_CHANNEL, notification.ToJson());
-                    }
+                        Type = ENotificationType.Restart,
+                    };
+                    RedisHelper.Publish(RedisHelper.Prefix + Constants.REDIS_NOTIFY_CHANNEL, notification.ToJson());
                 }
 
                 // 异步执行重启，避免阻塞当前请求
