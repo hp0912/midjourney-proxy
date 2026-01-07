@@ -34,6 +34,11 @@ namespace Midjourney.Base.Models
     public class Setting : DomainObject
     {
         /// <summary>
+        /// 启用 Discord 防撞图机制，默认对提示词添加 --seed 参数，避免生成重复图片
+        /// </summary>
+        public bool EnableDiscordAppendSeed { get; set; } = true;
+
+        /// <summary>
         /// 绘图完成是否填充官方 cdn 地址, 默认: false
         /// 如果是 true, 则绘图完成时对 imageUrls 和 videoUrls 填充 cdn.midjourney.com 的官方 cdn 地址
         /// </summary>
@@ -339,14 +344,14 @@ namespace Midjourney.Base.Models
         public S3StorageOptions S3Storage { get; set; } = new S3StorageOptions();
 
         /// <summary>
-        /// 换脸配置
-        /// </summary>
-        public ReplicateOptions Replicate { get; set; } = new ReplicateOptions();
-
-        /// <summary>
         /// 本地存储配置
         /// </summary>
         public LocalStorageOptions LocalStorage { get; set; } = new LocalStorageOptions();
+
+        /// <summary>
+        /// 换脸配置
+        /// </summary>
+        public ReplicateOptions Replicate { get; set; } = new ReplicateOptions();
 
         /// <summary>
         /// 全局开启垂直领域
@@ -454,7 +459,7 @@ namespace Midjourney.Base.Models
         public bool EnableAutoSyncInfoSetting { get; set; }
 
         /// <summary>
-        /// 启用 token 自动延期
+        /// 启用 token 自动延期（废弃）
         /// </summary>
         public bool EnableAutoExtendToken { get; set; }
 
@@ -550,13 +555,8 @@ namespace Midjourney.Base.Models
     /// <summary>
     /// 本地存储配置
     /// </summary>
-    public class LocalStorageOptions
+    public class LocalStorageOptions : BaseStorage
     {
-        /// <summary>
-        /// 加速域名，可用于图片加速和图片审核使用
-        /// </summary>
-        public string CustomCdn { get; set; }
-
         /// <summary>
         /// 合作商加速域名
         /// </summary>
@@ -566,20 +566,20 @@ namespace Midjourney.Base.Models
     /// <summary>
     /// Cloudflare R2 存储配置
     /// </summary>
-    public class CloudflareR2Options
+    public class CloudflareR2Options : BaseStorage
     {
         /// <summary>
-        /// 
+        ///
         /// </summary>
         public string AccountId { get; set; }
 
         /// <summary>
-        /// 
+        ///
         /// </summary>
         public string AccessKey { get; set; }
 
         /// <summary>
-        /// 
+        ///
         /// </summary>
         public string SecretKey { get; set; }
 
@@ -587,11 +587,6 @@ namespace Midjourney.Base.Models
         /// Bucket
         /// </summary>
         public string Bucket { get; set; }
-
-        /// <summary>
-        /// 加速域名，可用于图片加速和图片审核使用
-        /// </summary>
-        public string CustomCdn { get; set; }
 
         /// <summary>
         /// 默认图片样式
@@ -625,7 +620,7 @@ namespace Midjourney.Base.Models
     /// <summary>
     /// S3 兼容存储配置 (支持 MinIO)
     /// </summary>
-    public class S3StorageOptions
+    public class S3StorageOptions : BaseStorage
     {
         /// <summary>
         /// 服务端点 (例如: http://localhost:9000 或 https://s3.amazonaws.com)
@@ -663,11 +658,6 @@ namespace Midjourney.Base.Models
         public bool ForcePathStyle { get; set; } = true;
 
         /// <summary>
-        /// 自定义CDN域名，用于图片加速和图片审核
-        /// </summary>
-        public string CustomCdn { get; set; }
-
-        /// <summary>
         /// 默认图片样式参数
         /// </summary>
         public string ImageStyle { get; set; }
@@ -696,7 +686,7 @@ namespace Midjourney.Base.Models
     /// <summary>
     /// 腾讯云存储配置
     /// </summary>
-    public class TencentCosOptions
+    public class TencentCosOptions : BaseStorage
     {
         /// <summary>
         /// Tencent Cloud Account APPID
@@ -724,11 +714,6 @@ namespace Midjourney.Base.Models
         /// Bucket, format: BucketName-APPID
         /// </summary>
         public string Bucket { get; set; }
-
-        /// <summary>
-        /// 加速域名，可用于图片加速和图片审核使用
-        /// </summary>
-        public string CustomCdn { get; set; }
 
         /// <summary>
         /// 默认图片样式
@@ -839,21 +824,23 @@ namespace Midjourney.Base.Models
         /// </summary>
         public string UserToken { get; set; }
 
-        /// <summary>
-        /// 机器人 Token
-        ///
-        /// 1. 创建应用
-        /// https://discord.com/developers/applications
-        ///
-        /// 2. 设置应用权限（确保拥有读取内容权限）
-        /// [Bot] 设置 -> 全部开启
-        ///
-        /// 3. 添加应用到频道服务器
-        /// https://discord.com/oauth2/authorize?client_id=xxx&permissions=8&scope=bot
-        ///
-        /// 4. 复制或重置 Bot Token
-        /// </summary>
-        public string BotToken { get; set; }
+        ///// <summary>
+        ///// 机器人 Token（废弃）
+        /////
+        ///// <![CDATA[
+        ///// 1. 创建应用
+        ///// https://discord.com/developers/applications
+        /////
+        ///// 2. 设置应用权限（确保拥有读取内容权限）
+        ///// [Bot] 设置 -> 全部开启
+        /////
+        ///// 3. 添加应用到频道服务器
+        ///// https://discord.com/oauth2/authorize?client_id=xxx&permissions=8&scope=bot
+        /////
+        ///// 4. 复制或重置 Bot Token
+        ///// ]]>
+        ///// </summary>
+        //public string BotToken { get; set; }
 
         /// <summary>
         /// 用户UserAgent.
@@ -945,7 +932,6 @@ namespace Midjourney.Base.Models
         /// 日绘图最大次数限制，默认 0 不限制
         /// </summary>
         public int DayDrawLimit { get; set; } = -1;
-
 
         /// <summary>
         /// 日绘图最大次数限制，默认 -1 不限制（慢速）
@@ -1186,10 +1172,33 @@ namespace Midjourney.Base.Models
     }
 
     /// <summary>
-    /// 阿里云 OSS 配置
-    /// <see cref="https://help.aliyun.com/document_detail/31947.html"/>
+    /// 基础存储配置
     /// </summary>
-    public class AliyunOssOptions
+    public class BaseStorage
+    {
+        /// <summary>
+        /// 自定义加速域名
+        /// </summary>
+        public string CustomCdn { get; set; }
+
+        /// <summary>
+        /// 全球加速域名/国际加速域名，可用于境外服务拉取图片，例如：垫图、混图、参考图等
+        /// </summary>
+        public string GlobalCustomCdn { get; set; }
+
+        /// <summary>
+        /// 全球/国际自定义图片样式
+        /// </summary>
+        public string GlobalImageStyle { get; set; }
+    }
+
+    /// <summary>
+    /// 阿里云 OSS 配置
+    /// <![CDATA[
+    /// https://help.aliyun.com/document_detail/31947.html
+    /// ]]>
+    /// </summary>
+    public class AliyunOssOptions : BaseStorage
     {
         /// <summary>
         /// 存储空间是您用于存储对象（Object）的容器，所有的对象都必须隶属于某个存储空间。
@@ -1215,11 +1224,6 @@ namespace Midjourney.Base.Models
         /// Endpoint 表示OSS对外服务的访问域名。
         /// </summary>
         public string Endpoint { get; set; }
-
-        /// <summary>
-        /// 阿里云加速域名，可用于图片加速和图片审核使用
-        /// </summary>
-        public string CustomCdn { get; set; }
 
         /// <summary>
         /// 阿里云 OSS 默认图片样式

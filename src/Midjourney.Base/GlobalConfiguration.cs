@@ -22,9 +22,12 @@
 // invasion of privacy, or any other unlawful purposes is strictly prohibited.
 // Violation of these terms may result in termination of the license and may subject the violator to legal action.
 
+global using Midjourney.Base.Models;
+
 using System.Reflection;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Caching.Memory;
+using Midjourney.Base.Services;
 using Midjourney.Base.Util;
 using Serilog.Core;
 
@@ -77,14 +80,14 @@ namespace Midjourney.Base
         public static AsyncParallelLock GlobalLock { get; set; }
 
         /// <summary>
-        /// 静态资源参数映射
-        /// </summary>
-        public static Dictionary<string, string> ResourcesParamsMap { get; set; } = new Dictionary<string, string>();
-
-        /// <summary>
         /// 全局缓存项
         /// </summary>
         public static IMemoryCache MemoryCache { get; set; }
+
+        /// <summary>
+        /// 全局翻译服务（使用前必须配置）
+        /// </summary>
+        public static ITranslateService TranslateService { get; set; }
 
         /// <summary>
         /// 站点根目录 wwwroot

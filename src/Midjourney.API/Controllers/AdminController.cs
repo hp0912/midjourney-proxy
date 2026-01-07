@@ -34,9 +34,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 using Midjourney.Base.Options;
-using Midjourney.Infrastructure.LoadBalancer;
-using Midjourney.Infrastructure.Services;
 using Midjourney.License;
+using Midjourney.Services;
 using MongoDB.Driver;
 using Serilog;
 
@@ -56,7 +55,7 @@ namespace Midjourney.API.Controllers
         // 是否匿名用户
         private readonly bool _isAnonymous;
 
-        private readonly DiscordLoadBalancer _loadBalancer;
+        private readonly DiscordAccountService _accountService;
         private readonly DiscordAccountInitializer _discordAccountInitializer;
         private readonly Setting _properties;
         private readonly WorkContext _workContext;
@@ -66,7 +65,7 @@ namespace Midjourney.API.Controllers
 
         public AdminController(
             ITaskService taskService,
-            DiscordLoadBalancer loadBalancer,
+            DiscordAccountService accountService,
             DiscordAccountInitializer discordAccountInitializer,
             IMemoryCache memoryCache,
             WorkContext workContext,
@@ -76,7 +75,7 @@ namespace Midjourney.API.Controllers
             _freeSql = FreeSqlHelper.FreeSql;
             _upgradeService = upgradeService;
             _memoryCache = memoryCache;
-            _loadBalancer = loadBalancer;
+            _accountService = accountService;
             _taskService = taskService;
             _discordAccountInitializer = discordAccountInitializer;
             _workContext = workContext;
@@ -175,7 +174,7 @@ namespace Midjourney.API.Controllers
             _freeSql.Add(user);
 
             // 发送邮件
-            await EmailJob.Instance.EmailSend(GlobalConfiguration.Setting.Smtp,
+            await EmailHelper.Instance.EmailSend(GlobalConfiguration.Setting.Smtp,
                    $"Midjourney Proxy 注册通知", $"您的登录密码为：{user.Token}",
                    user.Email);
 
@@ -311,7 +310,7 @@ namespace Midjourney.API.Controllers
                         if (!request.Success)
                         {
                             // 发送邮件
-                            await EmailJob.Instance.EmailSend(_properties.Smtp, $"CF自动真人验证失败-{item.ChannelId}", $"CF自动真人验证失败-{item.ChannelId}, 请手动验证");
+                            await EmailHelper.Instance.EmailSend(_properties.Smtp, $"CF自动真人验证失败-{item.ChannelId}", $"CF自动真人验证失败-{item.ChannelId}, 请手动验证");
                         }
                     }
                     else
@@ -568,7 +567,7 @@ namespace Midjourney.API.Controllers
             {
                 // Token 加密
                 item.UserToken = "***";
-                item.BotToken = "***";
+                //item.BotToken = "***";
             }
 
             return Ok(item);
@@ -628,7 +627,7 @@ namespace Midjourney.API.Controllers
                 return Result.Fail("账号、密码、2FA 不能为空");
             }
 
-            var ok = DiscordAccountHelper.AutoLogin(model, model.Enable ?? false);
+            var ok = DiscordAccountService.AutoLogin(model, model.Enable ?? false);
             if (ok)
             {
                 return Result.Ok("登录请求已发送，请稍后刷新列表！");
@@ -694,7 +693,7 @@ namespace Midjourney.API.Controllers
                         if (!request.Success)
                         {
                             // 发送邮件
-                            await EmailJob.Instance.EmailSend(_properties.Smtp, $"自动登录失败-{item.ChannelId}", $"自动登录失败-{item.ChannelId}, {request.Message}, 请手动登录");
+                            await EmailHelper.Instance.EmailSend(_properties.Smtp, $"自动登录失败-{item.ChannelId}", $"自动登录失败-{item.ChannelId}, {request.Message}, 请手动登录");
                         }
                     }
                     else
@@ -1065,7 +1064,7 @@ namespace Midjourney.API.Controllers
 
             foreach (var item in list)
             {
-                var inc = _loadBalancer.GetDiscordInstance(item.ChannelId);
+                var inc = _accountService.GetDiscordInstance(item.ChannelId);
 
                 //item.RunningCount = inc?.GetRunningTaskCount ?? 0;
                 //item.QueueCount = inc?.GetQueueTaskCount ?? 0;
@@ -1076,7 +1075,7 @@ namespace Midjourney.API.Controllers
                 {
                     // Token 加密
                     item.UserToken = "****";
-                    item.BotToken = "****";
+                    //item.BotToken = "****";
 
                     item.CfUrl = "****";
                     item.CfHashUrl = "****";
@@ -1204,7 +1203,7 @@ namespace Midjourney.API.Controllers
 
             foreach (var item in list)
             {
-                var inc = _loadBalancer.GetDiscordInstance(item.ChannelId);
+                var inc = _accountService.GetDiscordInstance(item.ChannelId);
 
                 // 当前执行中的任务数
                 item.RunningCount = inc?.GetRunningTaskCount ?? 0;
@@ -1229,7 +1228,7 @@ namespace Midjourney.API.Controllers
                 {
                     // Token 加密
                     item.UserToken = "****";
-                    item.BotToken = "****";
+                    //item.BotToken = "****";
 
                     item.CfUrl = "****";
                     item.CfHashUrl = "****";
@@ -1340,25 +1339,20 @@ namespace Midjourney.API.Controllers
                 {
                     if (!targetTask.IsCompleted)
                     {
-                        if (DiscordInstance.GlobalRunningTasks.TryGetValue(id, out var task) && task != null)
+                        if (DiscordService.GlobalRunningTasks.TryGetValue(id, out var task) && task != null)
                         {
-                            // 取消任务
                             task.Fail("删除任务");
-                            _freeSql.DeleteById<TaskInfo>(id);
                         }
-                        else
-                        {
-                            targetTask.Fail("删除任务");
-                            _freeSql.DeleteById<TaskInfo>(id);
 
-                            var notification = new RedisNotification
-                            {
-                                Type = ENotificationType.DeleteTaskInfo,
-                                TaskInfoId = id
-                            };
-                            RedisHelper.Publish(RedisHelper.Prefix + Constants.REDIS_NOTIFY_CHANNEL, notification.ToJson());
-                        }
+                        var notification = new RedisNotification
+                        {
+                            Type = ENotificationType.DeleteTaskInfo,
+                            TaskInfoId = id
+                        };
+                        RedisHelper.Publish(RedisHelper.Prefix + Constants.REDIS_NOTIFY_CHANNEL, notification.ToJson());
                     }
+
+                    _freeSql.DeleteById<TaskInfo>(id);
                 }
             }
 
@@ -1917,7 +1911,7 @@ namespace Midjourney.API.Controllers
                 return Result.Fail<Setting>("演示模式，禁止操作");
             }
 
-            var consulSetting = await SettingHelper.LoadFromConsulAsync(consulOptions);
+            var consulSetting = await SettingService.LoadFromConsulAsync(consulOptions);
             if (consulSetting == null)
             {
                 return Result.Fail<Setting>("从 Consul 加载配置失败，请检查 Consul 地址/服务名称是否正确");
@@ -1977,7 +1971,7 @@ namespace Midjourney.API.Controllers
                 {
                     return Result.Fail("购买授权后，才允许使用 Consul 功能");
                 }
-                var success = await SettingHelper.Instance.IsConsulAvailableAsync(setting);
+                var success = await SettingService.Instance.IsConsulAvailableAsync(setting);
                 if (!success)
                 {
                     return Result.Fail("Consul 连接失败，请检查 Consul 地址/服务名称是否正确");
@@ -2017,10 +2011,10 @@ namespace Midjourney.API.Controllers
 
             setting.Id = Constants.DEFAULT_SETTING_ID;
 
-            await SettingHelper.Instance.SaveAsync(setting);
+            await SettingService.Instance.SaveAsync(setting);
 
             // 应用新配置
-            SettingHelper.Instance.ApplySettings();
+            SettingService.Instance.ApplySettings();
 
             // 首页缓存
             _memoryCache.Remove($"{DateTime.Now:yyyyMMdd}_home");

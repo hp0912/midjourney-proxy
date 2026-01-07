@@ -182,6 +182,8 @@ The most powerful, complete, full-featured, completely free and open source Midj
 
 ### 快速启动
 
+> 帮助文档：[WIKI](https://github.com/trueai-org/midjourney-proxy/wiki)
+
 > Docker 版本
 
 - [Bilibili Midjourney API Docker 部署视频教程](https://www.bilibili.com/video/BV1NQpQezEu4/)
@@ -203,6 +205,56 @@ sh docker-upgrade.sh
 # 3. Docker 环境变量
 # 3.1 节点最大任务并行数：-e CONCURRENT=10，默认不限制
 # 3.2 配置宿主私网 IP：-e HOST_IP=10.0.0.1，默认不配置
+```
+
+> Docker Compose 脚本说明：[Docker Compose Doc](https://github.com/trueai-org/midjourney-proxy/wiki/Docker-Compose-Doc)
+
+```bash
+# 通过 dokcker-compose 启动
+# 下载 docker-compose.yml 文件
+wget -O docker-compose.yml https://raw.githubusercontent.com/trueai-org/midjourney-proxy/main/scripts/docker-compose.yml
+
+# 启动容器和所有服务（启动前可编辑 docker-compose.yml 进行自定义配置，例如：路径、端口、内存、密码等配置，默认8086端口）
+# 默认：仅启动 MySQL
+docker compose up -d
+
+# 使用 PostgreSQL
+docker compose --profile postgres up -d
+
+# 使用 SQL Server（修改为强密码）
+docker compose --profile sqlserver up -d
+
+# 同时启动多个 profile
+docker compose --profile postgres --profile sqlserver up -d
+
+# 停止服务
+docker-compose down
+
+# 查看所有服务日志
+docker-compose logs -f
+
+# 查看特定服务日志
+docker-compose logs -f mjopen
+docker-compose logs -f mjopen-redis
+docker-compose logs -f mjopen-mysql
+
+# 重启所有服务
+docker-compose restart
+
+# 重启特定服务
+docker-compose restart mjopen
+
+# Redis 连接字符串：
+mjopen-redis:6379,password=123456,defaultDatabase=1,prefix=mjopen:
+
+# MySQL 连接字符串：
+Data Source=mjopen-mysql;Port=3306;User ID=root;Password=123456;Initial Catalog=mjopen;Charset=utf8mb4;SslMode=none;Min pool size=1
+
+# PostgreSQL 连接字符串：
+Host=mjopen-postgres;Port=5432;Username=mj;Password=123456;Database=mjopen;ArrayNullabilityMode=Always;Pooling=true;Minimum Pool Size=1
+
+# SQL Server 连接字符串
+Data Source=mjopen-sqlserver;User Id=sa;Password=Midjourney@123;Initial Catalog=mjopen;Encrypt=True;TrustServerCertificate=True;Pooling=true;Min Pool Size=1
 ```
 
 ```bash
@@ -293,24 +345,10 @@ c. 启动方式1: sh run_app_osx.sh
 d. 启动方式2: chmod +x run_app_osx.sh && ./run_app_osx.sh
 ```
 
-> Linux 一键安装脚本（❤感谢 [@dbccccccc](https://github.com/dbccccccc)）
+## 路径说明
 
-```bash
-# 方式1
-wget -N --no-check-certificate https://raw.githubusercontent.com/trueai-org/midjourney-proxy/main/scripts/linux_install.sh && chmod +x linux_install.sh && bash linux_install.sh
-
-# 方式2
-curl -o linux_install.sh https://raw.githubusercontent.com/trueai-org/midjourney-proxy/main/scripts/linux_install.sh && chmod +x linux_install.sh && bash linux_install.sh
-```
-
-## 参数配置
-
-[更多配置参数文档](./docs/appsettings.md)
-
-- `appsettings.json` 默认配置
-- `appsettings.Production.json` 生产环境配置
 - `/app/data` 数据目录，存放账号、任务等数据
-    - `/app/data/mj.db` 数据库文件
+    - `/app/data/mj.json` 配置文件
 - `/app/logs` 日志目录
 - `/app/wwwroot` 静态文件目录
     - `/app/wwwroot/attachments` 绘图文件目录
@@ -329,11 +367,11 @@ curl -o linux_install.sh https://raw.githubusercontent.com/trueai-org/midjourney
 
 ```json
 {
-  "bucketName": "mjopen",//创建的OSS名称
-  "accessKeyId": "LTAIa***",//OSS的accesskeyID
-  "accessKeySecret": "QGqO7***",//OSS的密钥
-  "endpoint": "oss-cn-hongkong-internal.aliyuncs.com",//OSS的域名
-  "customCdn": null,
+  "bucketName": "mjopen",// 创建的OSS名称
+  "accessKeyId": "LTAIa***",// OSS的accesskeyID
+  "accessKeySecret": "QGqO7***",// OSS的密钥
+  "endpoint": "oss-cn-hongkong-internal.aliyuncs.com",// OSS的域名
+  "customCdn": "自定义加速域名",
   "imageStyle": null,
   "thumbnailImageStyle": null,
   "videoSnapshotStyle": null,
@@ -342,26 +380,22 @@ curl -o linux_install.sh https://raw.githubusercontent.com/trueai-org/midjourney
 ```
 ### 数据库配置
 
-- `LiteDB`（已废弃）：存在性能问题，已废弃（如需迁移或保持请使用 v9.5.0 版本），默认存储位置：`data/mj.db`
-- `Sqlite`（默认）：本地默认数据库，默认存储位置：`data/mj_sqlite.db`
-- `MongoDB`：需要配置数据库连接字符串，示例：`mongodb://mongoadmin:***@192.168.3.241`，需要配置数据库名称：`mj`
-- `MySQL(推荐 8.x 版本)`：需要配置数据库连接字符串，示例：`Data Source=192.168.3.241;Port=3306;User ID=root;Password=xxx; Initial Catalog=mj;Charset=utf8mb4; SslMode=none;Min pool size=1`
-- `SqlServer`：需要配置数据库连接字符串，示例：`Data Source=192.168.3.241;User Id=sa;Password=xxx;Initial Catalog=mj;Encrypt=True;TrustServerCertificate=True;Pooling=true;Min Pool Size=1`
-- `PostgreSQL`：需要配置数据库连接字符串，示例：`Host=192.168.3.241;Port=5432;Username=mj;Password=xxx; Database=mj;ArrayNullabilityMode=Always;Pooling=true;Minimum Pool Size=1`，需要启动扩展支持字典类型 `CREATE EXTENSION hstore`
+- `Sqlite`：本地默认数据库，默认存储位置：`data/mj_sqlite.db`
+- `MySQL`：版本 >= 8.0，数据库连接字符串，示例：`Data Source=192.168.3.241;Port=3306;User ID=root;Password=xxx; Initial Catalog=mj;Charset=utf8mb4; SslMode=none;Min pool size=1`
+- `SQLServer`：数据库连接字符串，示例：`Data Source=192.168.3.241;User Id=sa;Password=xxx;Initial Catalog=mj;Encrypt=True;TrustServerCertificate=True;Pooling=true;Min Pool Size=1`
+- `PostgreSQL`：数据库连接字符串，示例：`Host=192.168.3.241;Port=5432;Username=mj;Password=xxx; Database=mj;ArrayNullabilityMode=Always;Pooling=true;Minimum Pool Size=1`，需要启动扩展支持字典类型 `CREATE EXTENSION hstore`
 
-### Redis 配置
+> Redis 配置
 
-`推荐开启 Redis`
-
-- 开启 Redis 支持分布式部署。
-- 开启 Redis 支持实时调整队列数、并发数。
-- 开启 Redis 支持重启继续任务。
-- 开启 Redis 可以自动过官网 CloudFlare 验证。
+- 支持分布式部署。
+- 支持实时调整队列数、并发数。
+- 支持重启继续任务。
+- 可以自动过官网 CloudFlare 验证。
 
 > Docker Redis 一键启动脚本参考：
 
 ```bash
-docker run --name redis --restart always -p 6379:6379 -v /root/mjopen/redis:/data -d redis:6.2.11 redis-server --appendonly yes --requirepass "123456"
+docker run --name mjopen-redis --restart always -p 6379:6379 -v /root/mjopen/redis:/data -d redis:6.2.11 redis-server --appendonly yes --requirepass "123456"
 ```
 
 > Docker Redis 连接字符串参考：
@@ -370,31 +404,28 @@ docker run --name redis --restart always -p 6379:6379 -v /root/mjopen/redis:/dat
 172.17.1.1:6379,password=123456,defaultDatabase=1,prefix=mjopen:
 ```
 
-### MongoDB 配置
-
-> 如果你的任务量未来可能超过 10 万，推荐 Docker 部署 MongoDB。
-
-> 注意：
-> 1.切换 MongoDB 历史任务可选择自动迁移。
-> 2.关于 IP 的填写方式有多种，内网 IP、外网 IP、容器互通等方式。
-
-1. 启动容器 `xxx` 为你的密码
-2. 打开系统设置 -> 输入 MongoDB 连接字符串 `mongodb://mongoadmin:xxx@ip` 即可
-3. 填写 MongoDB 数据库名称 -> `mj` -> 保存
-4. 重启服务
+> 容器互通参考脚本
 
 ```bash
-# 启动容器
-docker run -d \
-  --name mjopen-mongo \
-  -p 27017:27017 \
-  -v /root/mjopen/mongo/data:/data/db \
-  --restart always \
-  -e MONGO_INITDB_ROOT_USERNAME=mongoadmin \
-  -e MONGO_INITDB_ROOT_PASSWORD=xxx \
-  mongo
+# 创建网络
+docker network create mjopen-network
 
-# 创建数据库（也可以通过 BT 创建数据库）（可选）
+# 启动 MYSQL
+docker run --name mjopen-mysql --network mjopen-network --restart always \
+  -p 3306:3306 \
+  -v /root/mjopen/mysql:/var/lib/mysql \
+  -e MYSQL_ROOT_PASSWORD=*** \
+  -e TZ=Asia/Shanghai \
+  -d mysql:8.0
+
+# MYSQL 连接字符串
+Data Source=mjopen-mysql;Port=3306;User ID=root;Password=***;Initial Catalog=mjopen;Charset=utf8mb4;SslMode=none;Min pool size=1
+
+# 启动 REDIS
+docker run --name mjopen-redis --network mjopen-network --restart always -p 6379:6379 -v /root/mjopen/redis:/data -d redis:6.2.11 redis-server --appendonly yes --requirepass "***"
+
+# REDSI 连接字符串
+mjopen-redis:6379,password=***,defaultDatabase=1,prefix=mjopen:
 ```
 
 ### 换脸配置
@@ -475,13 +506,6 @@ docker run -d \
   "urls": "http://*:8081" // 默认端口
 }
 ```
-
-## 机器人 Token（可选配置）
-
-本项目利用 Discord 机器人 Token 连接 wss，可以获取错误信息和完整功能，确保消息的高可用性等问题。
-
-[机器人 Token 配置教程](./docs/api.md)
-
 ## 作图频繁预防警告
 
 - 任务间隔 30~180 秒，执行前间隔 3.6 秒以上
@@ -552,6 +576,38 @@ mc mb myminio/test
 
 # 设置匿名只读策略
 mc anonymous set download myminio/test
+```
+
+## 图片加速说明（仅供参考）
+
+如何选择正确的加速方式，以适用于多种客户需求？
+
+测试地址：https://boce.aliyun.com/detect/http
+
+- 国内用户推荐使用国内 CDN 加速，响应速度最快，稳定性最高，最便宜。
+- 国外用户推荐使用全球 CDN 加速，响应速度较快，稳定性较高，最便宜。
+
+
+```
+MJ 官网 CDN，受 CF 防火墙影响，平均 3s 左右，可能超时
+https://cdn.midjourney.com/4872b862-7aeb-4346-a87d-16e077a2935d/0_2.png
+
+源站加速，OSS 源站（0.5元/G），平均响应时长 2s ~ 3s，可能超时
+https://mjopen.oss-cn-hongkong.aliyuncs.com/attachments/4872b862-7aeb-4346-a87d-16e077a2935d/0_2.png
+
+传输加速（全球 CDN -  1T/126元，国内外都能访问，但是国内访问的话稍微慢一下)，平均响应时长 1s ~ 3s，一般都能响应
+https://mjcdn.googlec.cc/attachments/4872b862-7aeb-4346-a87d-16e077a2935d/0_2.png
+
+传输加速（国内 CDN -  1T/126元，国内极速访问)，平均响应时长 30ms ~ 200ms，极速响应
+https://mjcn-midjourney.googlec.cc/attachments/4872b862-7aeb-4346-a87d-16e077a2935d/0_2.png
+
+传输加速（0.5~1.25元/G，动态加速，非 CDN 节点)，平均响应时长 150ms ~ 500ms，极速响应
+https://mjopen.oss-accelerate.aliyuncs.com/attachments/4872b862-7aeb-4346-a87d-16e077a2935d/0_2.png
+
+腾讯云edge one，免费套餐，无限流量，测试专用，平均响应时长 300ms ~ 1s，快速响应
+http://img.aitop3000.com/attachments/4872b862-7aeb-4346-a87d-16e077a2935d/0_2.png
+
+其他方式：代理、自建、本地等
 ```
 
 ## 支持与赞助

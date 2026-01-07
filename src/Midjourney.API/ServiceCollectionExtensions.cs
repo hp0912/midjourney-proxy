@@ -22,95 +22,45 @@
 // invasion of privacy, or any other unlawful purposes is strictly prohibited.
 // Violation of these terms may result in termination of the license and may subject the violator to legal action.
 
-using System.Reflection;
-using Midjourney.Infrastructure.Handle;
-using Midjourney.Infrastructure.LoadBalancer;
-using Midjourney.Infrastructure.Services;
-
 namespace Midjourney.API
 {
     public static class ServiceCollectionExtensions
     {
         public static void AddMidjourneyServices(this IServiceCollection services, Setting config)
         {
-            // 注册所有的处理程序
-
-            // 机器人消息处理程序
-            services.AddTransient<BotMessageHandler, BotErrorMessageHandler>();
-            services.AddTransient<BotMessageHandler, BotImagineSuccessHandler>();
-            services.AddTransient<BotMessageHandler, BotRerollSuccessHandler>();
-            services.AddTransient<BotMessageHandler, BotStartAndProgressHandler>();
-            services.AddTransient<BotMessageHandler, BotUpscaleSuccessHandler>();
-            services.AddTransient<BotMessageHandler, BotVariationSuccessHandler>();
-            services.AddTransient<BotMessageHandler, BotDescribeSuccessHandler>();
-            services.AddTransient<BotMessageHandler, BotActionSuccessHandler>();
-            services.AddTransient<BotMessageHandler, BotBlendSuccessHandler>();
-            services.AddTransient<BotMessageHandler, BotShowSuccessHandler>();
-
-            // 用户消息处理程序
-            services.AddTransient<UserMessageHandler, UserErrorMessageHandler>();
-            services.AddTransient<UserMessageHandler, UserImagineSuccessHandler>();
-            services.AddTransient<UserMessageHandler, UserActionSuccessHandler>();
-            services.AddTransient<UserMessageHandler, UserUpscaleSuccessHandler>();
-            services.AddTransient<UserMessageHandler, UserBlendSuccessHandler>();
-            services.AddTransient<UserMessageHandler, UserDescribeSuccessHandler>();
-            services.AddTransient<UserMessageHandler, UserShowSuccessHandler>();
-            services.AddTransient<UserMessageHandler, UserVariationSuccessHandler>();
-            services.AddTransient<UserMessageHandler, UserStartAndProgressHandler>();
-            services.AddTransient<UserMessageHandler, UserRerollSuccessHandler>();
-            services.AddTransient<UserMessageHandler, UserShortenSuccessHandler>();
-
-            // 换脸服务
-            services.AddSingleton<FaceSwapInstance>();
-            services.AddSingleton<VideoFaceSwapInstance>();
-
             // 通知服务
-            services.AddSingleton<INotifyService, NotifyServiceImpl>();
-
-            // 任务服务
-            services.AddSingleton<ITaskStoreService, TaskRepository>();
-
-            // 账号负载均衡服务
-            switch (config.AccountChooseRule)
-            {
-                case AccountChooseRule.BestWaitIdle:
-                    services.AddSingleton<IDiscordInstanceRule, BestWaitIdleRule>();
-                    break;
-
-                case AccountChooseRule.Random:
-                    services.AddSingleton<IDiscordInstanceRule, RandomRule>();
-                    break;
-
-                case AccountChooseRule.Weight:
-                    services.AddSingleton<IDiscordInstanceRule, WeightRule>();
-                    break;
-
-                case AccountChooseRule.Polling:
-                    services.AddSingleton<IDiscordInstanceRule, RoundRobinRule>();
-                    break;
-
-                default:
-                    services.AddSingleton<IDiscordInstanceRule, BestWaitIdleRule>();
-                    break;
-            }
-
-            // Discord 负载均衡器
-            services.AddSingleton<DiscordLoadBalancer>();
-
-            // Discord 账号助手
-            services.AddSingleton<DiscordAccountHelper>();
-
-            // Discord 助手
-            services.AddSingleton<DiscordHelper>();
+            services.AddSingleton<INotifyService, NotifyService>();
 
             // 任务服务
             services.AddSingleton<ITaskService, TaskService>();
 
-            // 注册 MediatR
-            services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly()));
+            // 账号规则服务
+            switch (config.AccountChooseRule)
+            {
+                case AccountChooseRule.Random:
+                    services.AddSingleton<IDiscordRuleService, RandomRule>();
+                    break;
 
-            services.AddBaseServices(config);
-            services.AddInfrastructureServices(config);
+                case AccountChooseRule.Weight:
+                    services.AddSingleton<IDiscordRuleService, WeightRule>();
+                    break;
+
+                case AccountChooseRule.Polling:
+                    services.AddSingleton<IDiscordRuleService, RoundRobinRule>();
+                    break;
+
+                case AccountChooseRule.BestWaitIdle:
+                default:
+                    services.AddSingleton<IDiscordRuleService, BestWaitIdleRule>();
+                    break;
+            }
+
+            // 账号管理服务
+            services.AddSingleton<DiscordAccountService>();
+
+            // 换脸服务
+            services.AddSingleton<FaceSwapService>();
+            services.AddSingleton<VideoFaceSwapService>();
         }
     }
 }

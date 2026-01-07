@@ -31,7 +31,7 @@ global using Midjourney.Base.Models;
 global using Midjourney.Base.Services;
 global using Midjourney.Base.StandardTable;
 global using Midjourney.Base.Util;
-global using Midjourney.Infrastructure;
+global using Midjourney.Services;
 
 global using ILogger = Serilog.ILogger;
 global using TaskStatus = Midjourney.Base.TaskStatus;
@@ -42,7 +42,6 @@ using CSRedis;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.OpenApi.Models;
-using Midjourney.Infrastructure.Services;
 using Midjourney.License;
 using Midjourney.License.YouChuan;
 using MongoDB.Driver;
@@ -73,9 +72,9 @@ namespace Midjourney.API
                 // --- 服务注册与初始化 ---
 
                 // 初始化全局配置项（可能需要访问磁盘或 DB），必须在添加依赖前执行以确保 Setting 可用
-                await SettingHelper.InitializeAsync();
+                await SettingService.Instance.InitAsync();
 
-                var setting = SettingHelper.Instance.Current;
+                var setting = SettingService.Instance.Current;
 
                 // 是否需要重新保存配置
                 var isSaveSetting = false;
@@ -128,11 +127,11 @@ namespace Midjourney.API
                 // 需要重新保存配置，注意：如果版本过旧，重新保存配置可能会覆盖新的业务，需谨慎处理
                 if (isSaveSetting)
                 {
-                    await SettingHelper.Instance.SaveAsync(setting);
+                    await SettingService.Instance.SaveAsync(setting);
                 }
 
                 // 应用配置项
-                SettingHelper.Instance.ApplySettings();
+                SettingService.Instance.ApplySettings();
 
                 // 机器标识
                 LicenseKeyHelper.Startup();
@@ -253,9 +252,6 @@ namespace Midjourney.API
 
                 // 记录当前目录
                 Log.Information($"Current directory: {Directory.GetCurrentDirectory()}");
-
-                // 在这里把 ServiceProvider 传给静态门面（必须在 Build 之后）
-                MediatorProvider.SetServiceProvider(app.Services);
 
                 if (app.Environment.IsDevelopment())
                 {

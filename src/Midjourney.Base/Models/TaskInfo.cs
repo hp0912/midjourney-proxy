@@ -24,11 +24,11 @@
 
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using FreeSql.DataAnnotations;
 using Microsoft.Extensions.Caching.Memory;
 using Midjourney.Base.Data;
 using Midjourney.Base.Dto;
-using Midjourney.Base.Storage;
 using MongoDB.Driver;
 using Serilog;
 
@@ -37,8 +37,6 @@ namespace Midjourney.Base.Models
     /// <summary>
     /// 任务类，表示一个任务的基本信息。
     /// </summary>
-    [BsonCollection("task")]
-    [MongoDB.Bson.Serialization.Attributes.BsonIgnoreExtraElements]
     [Serializable]
     [Index("i_UserId", "UserId")]
     [Index("i_ClientIp", "ClientIp")]
@@ -58,6 +56,7 @@ namespace Midjourney.Base.Models
     [Index("i_PartnerTaskId", "PartnerTaskId")]
     [Index("i_IsOfficial", "IsOfficial")]
     [Index("i_OfficialTaskId", "OfficialTaskId")]
+    [Index("i_Status_SubmitTime_Mode_Action", "Status, SubmitTime, Mode, Action")]
     public class TaskInfo : DomainObject
     {
         /// <summary>
@@ -613,34 +612,6 @@ namespace Midjourney.Base.Models
         // ------------------------------------- 方法 --------------------------------------
 
         /// <summary>
-        /// 启动任务。
-        /// </summary>
-        public void Start()
-        {
-            StartTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-            Status = TaskStatus.SUBMITTED;
-            Progress = "0%";
-        }
-
-        /// <summary>
-        /// 任务成功。
-        /// </summary>
-        public void Success()
-        {
-            try
-            {
-                // 保存图片
-                StorageHelper.DownloadFile(this).ConfigureAwait(false).GetAwaiter().GetResult();
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "保存图片失败 {@0}", ImageUrl);
-            }
-
-            SuccessUpdate();
-        }
-
-        /// <summary>
         /// 异步保存成功（自动设置完成）
         /// </summary>
         /// <returns></returns>
@@ -691,6 +662,22 @@ namespace Midjourney.Base.Models
 
             // 根据最终提示词更新速度模式
             var finalPrompt = GetProperty(Constants.TASK_PROPERTY_FINAL_PROMPT, "");
+
+            // 是否开启 discord 防撞图机制
+            // 移除原有的 seed 参数
+            if (!string.IsNullOrWhiteSpace(Seed)
+                && IsDiscord
+                && GlobalConfiguration.Setting.EnableDiscordAppendSeed)
+            {
+                finalPrompt = finalPrompt?.RemoveSeed();
+                PromptFull = PromptFull?.RemoveSeed();
+                Prompt = Prompt?.RemoveSeed();
+                PromptEn = PromptEn?.RemoveSeed();
+
+                SetProperty(Constants.TASK_PROPERTY_MESSAGE_CONTENT, 
+                    GetProperty<string>(Constants.TASK_PROPERTY_MESSAGE_CONTENT, default)?.RemoveSeed());
+            }
+
             if (!string.IsNullOrWhiteSpace(finalPrompt))
             {
                 // 解析提示词
@@ -711,6 +698,8 @@ namespace Midjourney.Base.Models
                 }
 
                 Version = GetVersion(finalPrompt);
+
+                SetProperty(Constants.TASK_PROPERTY_FINAL_PROMPT, finalPrompt);
             }
 
             // 如果没有解析到，则使用默认值
@@ -803,10 +792,12 @@ namespace Midjourney.Base.Models
             try
             {
                 // 如果 language 是 zh 或 zh_cn 且配置了翻译服务，则翻译结果
-                if ((Language == "zh" || Language == "zh_cn") && !string.IsNullOrWhiteSpace(finalPrompt)
-                    && TranslateHelper.Instance != null)
+                var translateService = GlobalConfiguration.TranslateService;
+                if ((Language == "zh" || Language == "zh_cn")
+                    && !string.IsNullOrWhiteSpace(finalPrompt)
+                    && translateService != null)
                 {
-                    var translatedPrompt = TranslateHelper.Instance.TranslateToChinese(finalPrompt);
+                    var translatedPrompt = translateService.TranslateToChinese(finalPrompt);
                     if (!string.IsNullOrWhiteSpace(translatedPrompt))
                     {
                         Prompt = translatedPrompt;

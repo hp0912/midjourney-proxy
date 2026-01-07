@@ -26,7 +26,6 @@ using System.Net;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
-using Midjourney.Infrastructure.LoadBalancer;
 
 namespace Midjourney.API.Controllers
 {
@@ -40,13 +39,12 @@ namespace Midjourney.API.Controllers
     [Route("mj-relax/mj/submit")]
     public class SubmitController : ControllerBase
     {
-        private readonly ITaskStoreService _taskStoreService;
         private readonly ITaskService _taskService;
         private readonly ILogger<SubmitController> _logger;
         private readonly IMemoryCache _memoryCache;
         private readonly WorkContext _workContext;
         private readonly Setting _setting;
-        private readonly DiscordLoadBalancer _discordLoadBalancer;
+        private readonly DiscordAccountService _accountService;
         private readonly string _ip;
         private readonly IFreeSql _freeSql = FreeSqlHelper.FreeSql;
 
@@ -61,22 +59,19 @@ namespace Midjourney.API.Controllers
         private readonly EStorageOption? _storageOption;
 
         public SubmitController(
-            ITaskStoreService taskStoreService,
             ITaskService taskService,
             ILogger<SubmitController> logger,
             IHttpContextAccessor httpContextAccessor,
             WorkContext workContext,
-            DiscordLoadBalancer discordLoadBalancer,
+            DiscordAccountService accountService,
             IMemoryCache memoryCache)
         {
             _setting = GlobalConfiguration.Setting;
-
             _memoryCache = memoryCache;
-            _taskStoreService = taskStoreService;
             _taskService = taskService;
             _logger = logger;
             _workContext = workContext;
-            _discordLoadBalancer = discordLoadBalancer;
+            _accountService = accountService;
 
             var user = _workContext.GetUser();
 
@@ -182,7 +177,7 @@ namespace Midjourney.API.Controllers
                 List<DataUrl> dataUrls = new List<DataUrl>();
                 try
                 {
-                    dataUrls = ConvertUtils.ConvertBase64Array(base64Array);
+                    dataUrls = DataUrl.ConvertBase64Array(base64Array);
                 }
                 catch (Exception e)
                 {
@@ -233,7 +228,7 @@ namespace Midjourney.API.Controllers
             var dataUrls = new List<DataUrl>();
             try
             {
-                dataUrls = ConvertUtils.ConvertBase64Array(base64Array);
+                dataUrls = DataUrl.ConvertBase64Array(base64Array);
             }
             catch (Exception e)
             {
@@ -241,7 +236,7 @@ namespace Midjourney.API.Controllers
                 return Ok(SubmitResultVO.Fail(ReturnCode.VALIDATION_ERROR, "base64格式错误"));
             }
 
-            var (instance, mode) = _discordLoadBalancer.ChooseInstance(imagineDTO.AccountFilter);
+            var (instance, mode) = _accountService.ChooseInstance(imagineDTO.AccountFilter);
             if (instance == null)
             {
                 return Ok(SubmitResultVO.Fail(ReturnCode.VALIDATION_ERROR, "实例不存在或不可用"));
@@ -250,7 +245,7 @@ namespace Midjourney.API.Controllers
             var imageUrls = new List<string>();
             foreach (var dataUrl in dataUrls)
             {
-                var taskFileName = $"{Guid.NewGuid():N}.{MimeTypeUtils.GuessFileSuffix(dataUrl.MimeType)}";
+                var taskFileName = await dataUrl.GenerateFileName();
                 var uploadResult = await instance.UploadAsync(taskFileName, dataUrl);
                 if (uploadResult.Code != ReturnCode.SUCCESS)
                 {
@@ -334,8 +329,7 @@ namespace Midjourney.API.Controllers
             task.Action = TaskAction.DESCRIBE;
             task.Language = describeDTO.Language;
 
-            string taskFileName = $"{task.Id}.{FileFetchHelper.GuessFileSuffix(dataUrl.MimeType, dataUrl.Url)}";
-            task.Description = $"/describe {taskFileName}";
+            task.Description = $"/describe";
 
             NewTaskDoFilter(task, describeDTO.AccountFilter);
 
@@ -392,7 +386,7 @@ namespace Midjourney.API.Controllers
             List<string> base64Array = blendDTO.Base64Array;
             if (base64Array == null || base64Array.Count < 2 || base64Array.Count > 5)
             {
-                return Ok(SubmitResultVO.Fail(ReturnCode.VALIDATION_ERROR, "base64List参数错误"));
+                return Ok(SubmitResultVO.Fail(ReturnCode.VALIDATION_ERROR, "图片参数错误，2~5张图片"));
             }
 
             // blend 不限制上传
@@ -410,7 +404,7 @@ namespace Midjourney.API.Controllers
             List<DataUrl> dataUrlList = new List<DataUrl>();
             try
             {
-                dataUrlList = ConvertUtils.ConvertBase64Array(base64Array);
+                dataUrlList = DataUrl.ConvertBase64Array(base64Array);
             }
             catch (Exception e)
             {
@@ -445,7 +439,7 @@ namespace Midjourney.API.Controllers
                 return Ok(SubmitResultVO.Fail(ReturnCode.VALIDATION_ERROR, "参数错误"));
             }
 
-            var targetTask = _taskStoreService.Get(actionDTO.TaskId);
+            var targetTask = _freeSql.Get<TaskInfo>(actionDTO.TaskId);
             if (targetTask == null)
             {
                 return NotFound(SubmitResultVO.Fail(ReturnCode.NOT_FOUND, "关联任务不存在或已失效"));
@@ -527,7 +521,47 @@ namespace Midjourney.API.Controllers
             // MJ::JOB::reroll::0::898416ec-7c18-4762-bf03-8e428fee1860::SOLO
             else if (actionDTO.CustomId.StartsWith("MJ::JOB::reroll::"))
             {
-                task.Action = TaskAction.REROLL;
+                switch (targetTask.Action)
+                {
+                    case TaskAction.IMAGINE:
+                    case TaskAction.VARIATION:
+                    case TaskAction.DESCRIBE:
+                    case TaskAction.BLEND:
+                    case TaskAction.PAN:
+                    case TaskAction.ZOOM:
+                    case TaskAction.SHORTEN:
+                    case TaskAction.VIDEO:
+                    case TaskAction.EDIT:
+                    case TaskAction.UPSCALE_HD:
+                    case TaskAction.RETEXTURE:
+                        {
+                            // 允许重绘
+                            task.Action = targetTask.Action;
+                        }
+                        break;
+
+                    case TaskAction.UPSCALE:
+                        {
+                            // 重新提交
+                            task.Action = TaskAction.IMAGINE;
+                        }
+                        break;
+
+                    case TaskAction.REROLL:
+                    case TaskAction.ACTION:
+                    case TaskAction.OUTPAINT:
+                    case TaskAction.INPAINT:
+                    case TaskAction.SHOW:
+                    case TaskAction.SWAP_FACE:
+                    case TaskAction.SWAP_VIDEO_FACE:
+                    case TaskAction.VIDEO_EXTEND:
+                    case TaskAction.PIC_READER:
+                    default:
+                        {
+                            // 不允许重绘
+                            return Ok(SubmitResultVO.Fail(ReturnCode.VALIDATION_ERROR, "该任务不支持重新生成"));
+                        }
+                }
             }
             // 强变化
             // MJ::JOB::high_variation::1::7af96d1a-67c7-4d74-b173-8430c98c7631::SOLO
@@ -545,7 +579,7 @@ namespace Midjourney.API.Controllers
             // MJ::Outpaint::50::1::7af96d1a-67c7-4d74-b173-8430c98c7631::SOLO
             else if (actionDTO.CustomId.StartsWith("MJ::Outpaint::"))
             {
-                task.Action = TaskAction.ACTION;
+                task.Action = TaskAction.ZOOM;
             }
             // 平移
             // MJ::JOB::pan_left::1::7af96d1a-67c7-4d74-b173-8430c98c7631::SOLO
@@ -558,20 +592,20 @@ namespace Midjourney.API.Controllers
             // MJ::JOB::upsample_v6_2x_creative::1::7af96d1a-67c7-4d74-b173-8430c98c7631::SOLO
             else if (actionDTO.CustomId.StartsWith("MJ::JOB::upsample_"))
             {
-                task.Action = TaskAction.ACTION;
+                task.Action = TaskAction.UPSCALE_HD;
             }
             // 自定义变焦
             // "MJ::CustomZoom::439f8670-52e8-4f57-afaa-fa08f6d6c751"
             else if (actionDTO.CustomId.StartsWith("MJ::CustomZoom::"))
             {
-                task.Action = TaskAction.ACTION;
+                task.Action = TaskAction.ZOOM;
                 task.Description = "Waiting for window confirm";
             }
-            // 局部绘制
+            // 局部绘制 Vary Region
             // MJ::Inpaint::1::da2b1fda-0455-4952-9f0e-d4cb891f8b1e::SOLO
             else if (actionDTO.CustomId.StartsWith("MJ::Inpaint::"))
             {
-                task.Action = TaskAction.INPAINT;
+                task.Action = TaskAction.VARIATION;
             }
             // 视频操作
             // MJ::JOB::animate_low::1::a6b09718-e1f6-4f31-9a42-c6dd7d8f1c83::SOLO
@@ -586,9 +620,16 @@ namespace Midjourney.API.Controllers
                 task.ImageUrl = targetTask.ImageUrl;
                 task.Action = TaskAction.DESCRIBE;
             }
+            // 图生文 -> 再次文生图
+            else if (actionDTO.CustomId.StartsWith("MJ::Job::PicReader"))
+            {
+                task.Action = TaskAction.IMAGINE;
+            }
             else
             {
-                task.Action = TaskAction.ACTION;
+                _logger.LogWarning("未知的 Action 类型: {@0}, pid: {@1}", actionDTO.CustomId, targetTask.Id);
+
+                return Ok(SubmitResultVO.Fail(ReturnCode.VALIDATION_ERROR, "未知的 Action 类型"));
             }
 
             var data = await _taskService.SubmitAction(task, actionDTO);
@@ -609,7 +650,7 @@ namespace Midjourney.API.Controllers
                 return Ok(SubmitResultVO.Fail(ReturnCode.VALIDATION_ERROR, "参数错误"));
             }
 
-            var task = _taskStoreService.Get(actionDTO.TaskId);
+            var task = _freeSql.Get<TaskInfo>(actionDTO.TaskId);
             if (task == null)
             {
                 return NotFound(SubmitResultVO.Fail(ReturnCode.NOT_FOUND, "关联任务不存在或已失效"));
@@ -621,7 +662,7 @@ namespace Midjourney.API.Controllers
             // 兼容 rix api
             if (string.IsNullOrWhiteSpace(prompt) && !string.IsNullOrWhiteSpace(task.ParentId))
             {
-                var parentTask = _taskStoreService.Get(task.ParentId);
+                var parentTask = _freeSql.Get<TaskInfo>(task.ParentId);
                 if (parentTask != null)
                 {
                     // 优先使用父级提示词
@@ -900,7 +941,7 @@ namespace Midjourney.API.Controllers
                     return Ok(SubmitResultVO.Fail(ReturnCode.VALIDATION_ERROR, "任务类型错误"));
                 }
 
-                targetTask = _taskStoreService.Get(videoDTO.TaskId);
+                targetTask = _freeSql.Get<TaskInfo>(videoDTO.TaskId);
                 if (targetTask == null)
                 {
                     return NotFound(SubmitResultVO.Fail(ReturnCode.NOT_FOUND, "关联任务不存在或已失效"));
@@ -945,7 +986,7 @@ namespace Midjourney.API.Controllers
                 _logger.LogWarning("State参数过长，最大255字符，当前长度：{length}", baseDTO.State.Length);
                 throw new LogicException("State参数过长，最大255字符");
             }
-            if(baseDTO.NotifyHook?.Length>2000)
+            if (baseDTO.NotifyHook?.Length > 2000)
             {
                 _logger.LogWarning("NotifyHook参数过长，最大2000字符，当前长度：{length}", baseDTO.NotifyHook.Length);
                 throw new LogicException("NotifyHook参数过长，最大2000字符");
@@ -955,7 +996,7 @@ namespace Midjourney.API.Controllers
 
             var task = new TaskInfo
             {
-                Id = $"{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}{RandomUtils.RandomNumbers(3)}",
+                Id = $"{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}{RandomHelper.RandomNumbers(3)}",
                 SubmitTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 State = baseDTO.State,
                 Status = TaskStatus.NOT_START,
@@ -1218,10 +1259,13 @@ namespace Midjourney.API.Controllers
         /// <returns>翻译后的提示词</returns>
         private string TranslatePrompt(string prompt, EBotType botType)
         {
-            var translateService = TranslateHelper.Instance;
+            var translateService = GlobalConfiguration.TranslateService;
             var setting = GlobalConfiguration.Setting;
+
             if (translateService == null ||
-                _setting.TranslateWay == TranslateWay.NULL || string.IsNullOrWhiteSpace(prompt) || !translateService.ContainsChinese(prompt))
+                _setting.TranslateWay == TranslateWay.NULL
+                || string.IsNullOrWhiteSpace(prompt)
+                || !translateService.ContainsChinese(prompt))
             {
                 return prompt;
             }

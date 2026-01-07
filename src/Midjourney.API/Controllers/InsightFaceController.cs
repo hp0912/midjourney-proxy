@@ -24,7 +24,6 @@
 
 using System.Net;
 using Microsoft.AspNetCore.Mvc;
-using Midjourney.Infrastructure.LoadBalancer;
 
 namespace Midjourney.API.Controllers
 {
@@ -43,15 +42,15 @@ namespace Midjourney.API.Controllers
 
         private readonly GenerationSpeedMode? _mode;
         private readonly WorkContext _workContext;
-        private readonly FaceSwapInstance _faceSwapInstance;
-        private readonly VideoFaceSwapInstance _videoFaceSwapInstance;
+        private readonly FaceSwapService _faceSwapInstance;
+        private readonly VideoFaceSwapService _videoFaceSwapInstance;
         private readonly IFreeSql _freeSql = FreeSqlHelper.FreeSql;
 
         public InsightFaceController(
             IHttpContextAccessor httpContextAccessor,
             WorkContext workContext,
-            FaceSwapInstance faceSwapInstance,
-            VideoFaceSwapInstance videoFaceSwapInstance)
+            FaceSwapService faceSwapInstance,
+            VideoFaceSwapService videoFaceSwapInstance)
         {
             _workContext = workContext;
 
@@ -187,7 +186,7 @@ namespace Midjourney.API.Controllers
 
             var task = new TaskInfo
             {
-                Id = $"{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}{RandomUtils.RandomNumbers(3)}",
+                Id = $"{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}{RandomHelper.RandomNumbers(3)}",
                 SubmitTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 State = baseDTO.State,
                 Status = TaskStatus.NOT_START,
